@@ -42,3 +42,5 @@ def test_run_replay_summarises_days(tmp_path, monkeypatch):
     top = out["days"]["2026-01-09"]["top_event"]
     assert out["days"]["2026-01-09"]["regional_events"] == 1
     assert top["hint"] == "coarse" and top["provinces"] == ["서울"] and top["peak_pm10"] == 300
+    assert top["provinces_seen"] == ["서울"] and top["max_stations"] == 4
+    assert top["first_ts"] <= top["ts"] <= top["last_ts"]

@@ -101,7 +101,7 @@ def fetch_event(name: str) -> dict:
     return report
 
 
-def _summarise(cand: Candidate) -> dict:
+def _summarise(cand: Candidate, seen: dict) -> dict:
     f = cand.features
     return {
         "event_id": cand.event_id,
@@ -115,6 +115,11 @@ def _summarise(cand: Candidate) -> dict:
         "hint": cand.hint,
         "hotspots_50km_24h": f.get("hotspots_50km_24h"),
         "severity": round(cand.severity, 2),
+        # where the event went during the day; the snapshot above is only its most severe hour
+        "provinces_seen": sorted(seen["provinces"]),
+        "max_stations": seen["max_stations"],
+        "first_ts": seen["first_ts"].isoformat(),
+        "last_ts": seen["last_ts"].isoformat(),
     }
 
 
@@ -122,7 +127,8 @@ def run_replay(name: str) -> dict:
     """Run detection hour by hour over the event window and return a summary dict.
 
     Hours run from window start + 7 days (baseline) to the window end. Per KST day: the
-    number of distinct regional events and each one at its most severe hour (top first).
+    number of distinct regional events and each one at its most severe hour (top first), plus
+    the provinces it covered, its largest station count and its first/last hour that day.
     """
     ev = get_event(name)
     conn = store.connect(config.event_db_path(name))
@@ -132,22 +138,30 @@ def run_replay(name: str) -> dict:
     while at <= ev.end:
         # an hour stamped 00:00 closes the previous KST day's interval; count it by its own date
         day = at.astimezone(KST).date().isoformat()
-        slot = per_day.setdefault(day, {"best": {}})
+        slot = per_day.setdefault(day, {"best": {}, "seen": {}})
         for cand in detect.detect(conn, at):
             if cand.kind != "regional":
                 continue
             best = slot["best"].get(cand.event_id)
             if best is None or cand.severity > best.severity:
                 slot["best"][cand.event_id] = cand
+            seen = slot["seen"].setdefault(
+                cand.event_id,
+                {"provinces": set(), "max_stations": 0, "first_ts": cand.ts, "last_ts": cand.ts},
+            )
+            seen["provinces"].update(cand.features.get("provinces") or [])
+            seen["max_stations"] = max(seen["max_stations"], len(cand.station_keys))
+            seen["last_ts"] = cand.ts
         at += timedelta(hours=1)
     days = {}
     for day, slot in per_day.items():
         ranked = sorted(slot["best"].values(), key=lambda c: -c.severity)
+        # every regional event of the day at its most severe hour
+        summaries = [_summarise(c, slot["seen"][c.event_id]) for c in ranked]
         days[day] = {
             "regional_events": len(ranked),
-            "top_event": _summarise(ranked[0]) if ranked else None,
-            # every regional event of the day at its most severe hour
-            "events": [_summarise(c) for c in ranked],
+            "top_event": summaries[0] if summaries else None,
+            "events": summaries,
         }
     return {
         "event": name,
