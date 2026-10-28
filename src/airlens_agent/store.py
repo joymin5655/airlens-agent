@@ -13,7 +13,8 @@ from .models import Candidate, GridSample, Hotspot, Observation, Station
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS stations (
-    key TEXT PRIMARY KEY, name TEXT, sido TEXT, lat REAL, lon REAL, code TEXT, source TEXT
+    key TEXT PRIMARY KEY, name TEXT, sido TEXT, lat REAL, lon REAL, code TEXT, source TEXT,
+    network TEXT
 );
 CREATE TABLE IF NOT EXISTS observations (
     station_key TEXT NOT NULL, ts TEXT NOT NULL,
@@ -47,6 +48,8 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    if "network" not in {r[1] for r in conn.execute("PRAGMA table_info(stations)")}:
+        conn.execute("ALTER TABLE stations ADD COLUMN network TEXT")
     conn.execute(quota.SCHEMA)
     conn.commit()
     return conn
@@ -58,8 +61,8 @@ def _iso(ts: datetime) -> str:
 
 def upsert_stations(conn: sqlite3.Connection, stations: list[Station]) -> int:
     conn.executemany(
-        "INSERT OR REPLACE INTO stations VALUES (?,?,?,?,?,?,?)",
-        [(s.key, s.name, s.sido, s.lat, s.lon, s.code, s.source) for s in stations],
+        "INSERT OR REPLACE INTO stations VALUES (?,?,?,?,?,?,?,?)",
+        [(s.key, s.name, s.sido, s.lat, s.lon, s.code, s.source, s.network) for s in stations],
     )
     conn.commit()
     return len(stations)

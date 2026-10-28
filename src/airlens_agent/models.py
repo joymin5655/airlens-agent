@@ -13,6 +13,7 @@ class Station:
     lon: float | None
     code: str | None
     source: str
+    network: str | None = None  # 측정망, e.g. "도시대기", "도로변대기"
 
 
 @dataclass

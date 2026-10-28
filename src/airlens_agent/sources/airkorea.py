@@ -167,6 +167,7 @@ def parse_stations(payload: dict) -> list[Station]:
             Station(
                 key=station_key(sido, name), name=name, sido=sido, lat=lat, lon=lon,
                 code=None, source="airkorea-msrstn",
+                network=(it.get("mangName") or "").strip() or None,
             )
         )
     return out
