@@ -124,3 +124,12 @@ def test_sp_with_rows_does_not_fall_back(conn, monkeypatch):
         sources=("MODIS_SP",), fallbacks=fallbacks,
     )
     assert len(urls) == 1 and fallbacks == [] and rows[0].source == "MODIS_SP"
+
+
+def test_non_csv_key_straddling_the_cut_is_redacted(monkeypatch):
+    key = "FAKEKEY0" * 4  # 32 chars, starting at position 110 of the body
+    monkeypatch.setenv("NASA_FIRMS_MAP_KEY", key)
+    body = "x" * 110 + key + " tail"
+    with pytest.raises(http.HttpError) as exc:
+        firms.parse_csv(body, "MODIS_NRT")
+    assert not any(key[i:i + 8] in str(exc.value) for i in range(len(key) - 7))

@@ -124,7 +124,7 @@ def test_event_linking_across_hours(conn):
     for st in far:
         add_obs(conn, st.key, spike=300, pm25_spike=50, at=AT + timedelta(hours=2))
     ids = {c.event_id for c in detect.detect(conn, AT + timedelta(hours=2))}
-    assert first.event_id not in ids or len(ids) > 1
+    assert ids and first.event_id not in ids
 
 
 def test_hotspots_counted_within_50km(conn):
@@ -160,3 +160,30 @@ def test_hint_and_severity_formulas():
     assert detect.hint_for(None, 300) == "mixed"
     assert detect.severity(151, None, 1) == pytest.approx(1.0)
     assert detect.severity(None, 152, 4) == pytest.approx(2 * (1 + 1.3862943611), rel=1e-6)
+
+
+def test_rerun_same_hour_keeps_ids(conn):
+    for key in add_stations(conn, "abcd"):
+        add_obs(conn, key, spike=300, pm25_spike=50)
+    first = detect.detect(conn, AT)
+    second = detect.detect(conn, AT)
+    assert first and [c.event_id for c in second] == [c.event_id for c in first]
+    assert conn.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] == len(first)
+
+
+def test_rerun_latest_hour_after_link_keeps_id(conn):
+    for key in add_stations(conn, "abcd"):
+        add_obs(conn, key, spike=300, pm25_spike=50)
+        store.upsert_observations(conn, [
+            Observation(key, AT + timedelta(hours=1), pm10=310, pm25=55)])
+    [first] = detect.detect(conn, AT)
+    detect.detect(conn, AT + timedelta(hours=1))
+    [again] = detect.detect(conn, AT + timedelta(hours=1))
+    assert again.event_id == first.event_id
+    assert conn.execute(
+        "SELECT COUNT(*) FROM candidates WHERE event_id=?", (first.event_id,)
+    ).fetchone()[0] == 1
+
+
+def test_detect_on_empty_db_returns_nothing(conn):
+    assert detect.detect(conn, AT) == []

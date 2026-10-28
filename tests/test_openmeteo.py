@@ -99,6 +99,8 @@ def test_wind_old_range_uses_archive_and_historical_forecast(conn, monkeypatch):
     for _, params, _ in calls:
         assert params["wind_speed_unit"] == "ms" and params["timezone"] == "Asia/Seoul"
         assert params["start_date"] == "2025-03-22" and params["end_date"] == "2025-03-25"
+    archive_params, hist_params = calls[0][1], calls[1][1]
+    assert archive_params["models"] == "era5" and "models" not in hist_params
     assert {s.source for s in samples} == {"openmeteo.era5", "openmeteo.hist_fc"}
     era5 = next(s for s in samples if s.source == "openmeteo.era5")
     assert era5.variables["wind_speed_10m"] == 3.2

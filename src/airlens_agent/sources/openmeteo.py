@@ -1,4 +1,4 @@
-"""Open-Meteo wind and CAMS air-quality samples (owner: implementer B).
+"""Open-Meteo wind and CAMS air-quality samples.
 
 Weather data by Open-Meteo.com (CC BY 4.0) and CAMS. Free tier: non-commercial, <10,000 calls/day.
 """
@@ -118,7 +118,7 @@ def fetch_wind(
         dates = {"start_date": start_day.isoformat(), "end_date": end_day.isoformat()}
         samples = _fetch_hourly(
             conn, ARCHIVE_URL, "openmeteo.archive", points, WIND_VARS, "openmeteo.era5",
-            {**common, **dates},
+            {**common, **dates, "models": "era5"},
         )
         samples += _fetch_hourly(
             conn, HIST_FORECAST_URL, "openmeteo.historical_forecast", points, WIND_850_VARS,

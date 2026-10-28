@@ -1,4 +1,4 @@
-"""NASA GIBS true-colour and aerosol satellite images (owner: implementer B)."""
+"""NASA GIBS true-colour and aerosol satellite images."""
 
 import io
 import json

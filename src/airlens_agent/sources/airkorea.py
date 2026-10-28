@@ -4,6 +4,8 @@ import re
 import sqlite3
 from datetime import date, datetime, timedelta
 
+import httpx
+
 from .. import config, http, store
 from ..config import KST
 from ..models import Forecast, Observation, Station
@@ -13,6 +15,7 @@ REALTIME_URL = f"{BASE}/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"
 FORECAST_URL = f"{BASE}/ArpltnInforInqireSvc/getMinuDustFrcstDspth"
 STATIONS_URL = f"{BASE}/MsrstnInfoInqireSvc/getMsrstnList"
 
+_OK_CODES = ("00", "03")  # normal, and NODATA (no rows)
 _POLLUTANTS = ("pm10", "pm25", "o3", "no2", "co", "so2")
 
 # Full province names in station `addr` -> the short `sidoName` used by the realtime API.
@@ -54,6 +57,21 @@ def _items(resp_json: dict) -> list[dict]:
     return items if isinstance(items, list) else items.get("item", [])
 
 
+def _payload(resp: httpx.Response, op: str) -> dict:
+    """JSON body of a data.go.kr reply. The gateway answers key and quota errors with HTTP 200,
+    as XML/text or as a JSON header with a non-zero resultCode; both raise http.HttpError."""
+    try:
+        payload = resp.json()
+    except ValueError:
+        snippet = http.redact(resp.text)[:200]
+        raise http.HttpError(f"{op}: non-JSON response: {snippet!r}") from None
+    header = (payload.get("response") or {}).get("header") or {}
+    code = str(header.get("resultCode", "00")).zfill(2)
+    if code not in _OK_CODES:
+        raise http.HttpError(http.redact(f"{op}: resultCode {code} {header.get('resultMsg', '')}"))
+    return payload
+
+
 def parse_realtime(payload: dict) -> list[Observation]:
     """Items with a null dataTime are skipped; flagged values become None plus a flag note."""
     out = []
@@ -87,7 +105,7 @@ def fetch_realtime_nation(conn: sqlite3.Connection) -> list[Observation]:
         "pageNo": 1, "sidoName": "전국", "ver": "1.0",
     }
     resp = http.get(REALTIME_URL, params, op="airkorea.realtime", conn=conn)
-    return parse_realtime(resp.json())
+    return parse_realtime(_payload(resp, "airkorea.realtime"))
 
 
 def parse_grades(text: str | None) -> dict[str, str]:
@@ -131,7 +149,7 @@ def fetch_forecast(conn: sqlite3.Connection, day: date) -> list[Forecast]:
             "pageNo": 1, "searchDate": day.isoformat(), "InformCode": code,
         }
         resp = http.get(FORECAST_URL, params, op="airkorea.forecast", conn=conn)
-        out += parse_forecast(resp.json(), day)
+        out += parse_forecast(_payload(resp, "airkorea.forecast"), day)
     return out
 
 
@@ -178,6 +196,6 @@ def fetch_stations(conn: sqlite3.Connection) -> list[Station]:
         "serviceKey": config.data_go_kr_key(), "returnType": "json", "numOfRows": 1000, "pageNo": 1,
     }
     resp = http.get(STATIONS_URL, params, op="airkorea.stations", conn=conn)
-    stations = parse_stations(resp.json())
+    stations = parse_stations(_payload(resp, "airkorea.stations"))
     store.upsert_stations(conn, stations)
     return stations

@@ -21,3 +21,13 @@ def test_uncapped_ops_only_count(conn):
 def test_other_day_not_counted(conn):
     quota.reserve(conn, "airkorea.realtime")
     assert quota.usage(conn, day="2000-01-01")["airkorea.realtime"]["used"] == 0
+
+
+def test_refused_reserve_leaves_usage_at_cap(conn):
+    cap = QUOTA_CAPS["airkorea.forecast"]
+    for _ in range(cap + 3):
+        try:
+            quota.reserve(conn, "airkorea.forecast")
+        except quota.QuotaExceeded:
+            pass
+    assert quota.usage(conn)["airkorea.forecast"]["used"] == cap

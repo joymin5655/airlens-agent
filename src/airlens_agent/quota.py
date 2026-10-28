@@ -24,17 +24,15 @@ def reserve(conn: sqlite3.Connection, op: str) -> None:
     """Count one call; raise QuotaExceeded if the op has a cap that is already reached."""
     conn.execute(SCHEMA)
     day = today()
-    row = conn.execute("SELECT n FROM api_calls WHERE op=? AND day=?", (op, day)).fetchone()
-    n = row[0] if row else 0
     cap = QUOTA_CAPS.get(op)
-    if cap is not None and n >= cap:
-        raise QuotaExceeded(f"{op}: daily cap {cap} reached ({day})")
-    conn.execute(
-        "INSERT INTO api_calls(op, day, n) VALUES (?, ?, 1) "
-        "ON CONFLICT(op, day) DO UPDATE SET n = n + 1",
-        (op, day),
+    cur = conn.execute(
+        "INSERT INTO api_calls(op, day, n) VALUES (:op, :day, 1) "
+        "ON CONFLICT(op, day) DO UPDATE SET n = n + 1 WHERE :cap IS NULL OR n < :cap",
+        {"op": op, "day": day, "cap": cap},
     )
     conn.commit()
+    if cur.rowcount == 0:
+        raise QuotaExceeded(f"{op}: daily cap {cap} reached ({day})")
 
 
 def usage(conn: sqlite3.Connection, day: str | None = None) -> dict[str, dict]:

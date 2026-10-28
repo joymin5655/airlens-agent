@@ -1,4 +1,4 @@
-"""NASA FIRMS fire hotspots (owner: implementer B).
+"""NASA FIRMS fire hotspots.
 
 The MAP_KEY sits in the URL path, so URLs are never logged and errors go through http.redact.
 """
@@ -45,7 +45,8 @@ def parse_csv(text: str, source: str) -> list[Hotspot]:
         return []
     header = body.splitlines()[0].lower()
     if "latitude" not in header or "longitude" not in header:
-        raise http.HttpError(http.redact(f"firms.area: non-CSV response: {body[:120]!r}"))
+        snippet = http.redact(body)[:120]
+        raise http.HttpError(f"firms.area: non-CSV response: {snippet!r}")
     rows = []
     for row in csv.DictReader(io.StringIO(body)):
         acq_time = (row.get("acq_time") or "0").zfill(4)

@@ -4,10 +4,23 @@ import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 
-# usecwd=True walks up from the cwd, so a repo-root .env is found from .worktrees/<name>/ too.
-load_dotenv(find_dotenv(usecwd=True))
+# Checkout root from this file (src/airlens_agent/config.py), never from the cwd. A worktree at
+# <repo>/.worktrees/<name>/ also reads the main checkout's .env and shares its data/ folder.
+# ponytail: assumes a source checkout (uv run); a packaged deploy sets AIRLENS_AGENT_DATA and
+# env vars.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+MAIN_ROOT = PROJECT_ROOT.parent.parent if PROJECT_ROOT.parent.name == ".worktrees" else PROJECT_ROOT
+
+
+def env_files() -> list[Path]:
+    """.env files read at import, nearest first; nothing above the checkout is read."""
+    return list(dict.fromkeys([PROJECT_ROOT / ".env", MAIN_ROOT / ".env"]))
+
+
+for _path in env_files():
+    load_dotenv(_path)  # a missing file is skipped; set variables are never overridden
 
 KST = ZoneInfo("Asia/Seoul")
 
@@ -39,7 +52,7 @@ def firms_map_key() -> str:
 
 
 def data_dir() -> Path:
-    return Path(os.environ.get("AIRLENS_AGENT_DATA") or Path.cwd() / "data")
+    return Path(os.environ.get("AIRLENS_AGENT_DATA") or MAIN_ROOT / "data")
 
 
 def live_db_path() -> Path:

@@ -129,7 +129,7 @@ def observations_between(conn: sqlite3.Connection, start: datetime, end: datetim
         conn,
         params=(_iso(start.astimezone(KST)), _iso(end.astimezone(KST))),
     )
-    df["ts"] = pd.to_datetime(df["ts"], format="ISO8601").dt.tz_convert(KST)
+    df["ts"] = pd.to_datetime(df["ts"], format="ISO8601", utc=True).dt.tz_convert(KST)
     return df
 
 

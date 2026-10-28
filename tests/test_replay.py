@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta
 
-from airlens_agent import config, events, replay, store
+from airlens_agent import config, events, http, replay, store
 from airlens_agent.config import KST
 from airlens_agent.models import Observation, Station
 
@@ -44,3 +44,11 @@ def test_run_replay_summarises_days(tmp_path, monkeypatch):
     assert top["hint"] == "coarse" and top["provinces"] == ["서울"] and top["peak_pm10"] == 300
     assert top["provinces_seen"] == ["서울"] and top["max_stations"] == 4
     assert top["first_ts"] <= top["ts"] <= top["last_ts"]
+
+
+def test_step_skips_a_failed_source(capsys):
+    def down():
+        raise http.HttpError("gibs: HTTP 500")
+
+    assert replay._step("gibs x", down) is None
+    assert "[gibs x] failed, skipped" in capsys.readouterr().err

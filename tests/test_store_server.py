@@ -60,3 +60,15 @@ def test_server_endpoints(tmp_path, monkeypatch):
     assert health["quota"]["airkorea.realtime"]["cap"] == 30
     anomalies = client.get("/anomalies?limit=5").json()
     assert [a["event_id"] for a in anomalies] == ["e1"]
+
+
+def test_observations_between_empty_is_tz_aware(conn):
+    df = store.observations_between(conn, TS, TS)
+    assert df.empty and df["ts"].dt.tz is not None
+
+
+def test_anomalies_limit_validated(tmp_path, monkeypatch):
+    monkeypatch.setenv("AIRLENS_AGENT_DATA", str(tmp_path))
+    client = TestClient(server.app)
+    for limit in (-1, 0, 101):
+        assert client.get(f"/anomalies?limit={limit}").status_code == 422

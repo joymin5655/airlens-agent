@@ -5,7 +5,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import config, detect, store
+from . import config, detect, http, store
 from .config import KST
 from .events import Event, get_event
 from .models import Candidate
@@ -36,11 +36,11 @@ def _expand(
 
 
 def _step(label: str, fn) -> object:
-    """Run a connector step; a not-yet-built one is skipped so it can be re-run later."""
+    """Run a connector step; an HTTP failure or a missing key skips it so the rest still run."""
     try:
         return fn()
-    except NotImplementedError:
-        _say(f"[{label}] connector not built yet, skipped (re-run fetch-event later)")
+    except (http.HttpError, config.MissingKeyError) as exc:
+        _say(f"[{label}] failed, skipped (re-run fetch-event later): {exc}")
         return None
 
 

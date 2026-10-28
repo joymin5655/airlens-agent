@@ -1,6 +1,6 @@
 """Read-only HTTP API over the live DB."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 
 from . import config, quota, store
 
@@ -22,7 +22,7 @@ def health() -> dict:
 
 
 @app.get("/anomalies")
-def anomalies(limit: int = 20) -> list[dict]:
+def anomalies(limit: int = Query(20, ge=1, le=100)) -> list[dict]:
     conn = store.connect(config.live_db_path())
     try:
         return store.latest_candidates(conn, limit)

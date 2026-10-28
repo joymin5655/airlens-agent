@@ -5,7 +5,7 @@ import json
 import sys
 from datetime import datetime
 
-from . import config, detect, quota, replay, store
+from . import config, detect, http, quota, replay, store
 from .sources import airkorea, firms
 
 
@@ -14,11 +14,11 @@ def _live():
 
 
 def _step(name: str, fn):
-    """Run one pipeline step; a not-yet-built step is reported and skipped."""
+    """Run one optional step; a failed source or missing key is reported and skipped."""
     try:
         return fn()
-    except NotImplementedError:
-        print(f"[{name}] not built yet, skipping", file=sys.stderr)
+    except (http.HttpError, config.MissingKeyError) as exc:
+        print(f"[{name}] skipped: {exc}", file=sys.stderr)
         return None
 
 
@@ -27,12 +27,12 @@ def cmd_fetch_now(_args) -> dict:
     obs = airkorea.fetch_realtime_nation(conn)
     store.upsert_observations(conn, obs)
     hotspots = _step("firms", lambda: firms.fetch_hotspots(conn, firms.WATCH_BBOX))
-    candidates = _step("detect", lambda: detect.detect_latest(conn))
+    candidates = detect.detect_latest(conn)
     return {
         "observations": len(obs),
         "latest_ts": max((o.ts for o in obs), default=None),
         "hotspots": None if hotspots is None else len(hotspots),
-        "candidates": None if candidates is None else len(candidates),
+        "candidates": len(candidates),
     }
 
 
@@ -57,8 +57,7 @@ def cmd_quota(_args) -> dict:
 
 
 def cmd_fetch_event(args) -> dict:
-    replay.fetch_event(args.name)
-    return {"event": args.name, "status": "fetched"}
+    return replay.fetch_event(args.name)
 
 
 def cmd_replay(args) -> dict:
@@ -78,11 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("name")
         p.set_defaults(fn=fn)
     args = parser.parse_args(argv)
-    try:
-        result = args.fn(args)
-    except NotImplementedError:
-        print(f"{args.command}: not built yet", file=sys.stderr)
-        return 2
+    result = args.fn(args)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0
 

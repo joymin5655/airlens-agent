@@ -25,7 +25,7 @@ VERY_BAD = {"pm10": 151.0, "pm25": 76.0}
 Z_MIN = 3.5
 MIN_BASELINE_HOURS = 48
 BASELINE_DAYS = 7
-EPS = 1.0  # ug/m3 floor on the scale: archive values are integers, so MAD is often 0
+EPS = 1.0  # ug/m3 added to the scale: archive values are integers, so MAD is often 0
 CLUSTER_KM = 40.0
 REGIONAL_MIN_STATIONS = 3
 HOTSPOT_KM = 50.0
@@ -152,11 +152,12 @@ def _hotspots_near(
 def _link_ids(
     conn: sqlite3.Connection, at: datetime, drafts: list[dict]
 ) -> list[str]:
-    """Reuse the event_id of a candidate from the previous 3 hours (station Jaccard >= 0.3 or
-    centroids <= 50 km apart, best match first, each old id used once)."""
+    """Reuse the event_id of a candidate from the previous 3 hours, including rows already saved
+    for this hour so a re-run keeps its ids (station Jaccard >= 0.3 or centroids <= 50 km apart,
+    best match first, each old id used once)."""
     rows = conn.execute(
         "SELECT event_id, station_keys, centroid_lat, centroid_lon FROM candidates "
-        "WHERE ts >= ? AND ts < ?",
+        "WHERE ts >= ? AND ts <= ?",
         ((at - timedelta(hours=LINK_HOURS)).isoformat(), at.isoformat()),
     ).fetchall()
     prev = [(eid, set(json.loads(keys)), lat, lon) for eid, keys, lat, lon in rows]

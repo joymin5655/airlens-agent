@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from airlens_agent import config
+from airlens_agent import http
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,12 +17,7 @@ def _files() -> list[Path]:
 
 
 def test_no_key_values_in_repo_files():
-    keys = []
-    for getter in (config.data_go_kr_key, config.firms_map_key):
-        try:
-            keys.append(getter())
-        except config.MissingKeyError:
-            pass
+    keys = http._secrets()  # raw and percent-encoded forms of every configured key
     if not keys:
         pytest.skip("no keys configured")
     leaked = []

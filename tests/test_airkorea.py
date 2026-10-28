@@ -1,5 +1,9 @@
 from datetime import date, datetime
 
+import httpx
+import pytest
+
+from airlens_agent import http, quota
 from airlens_agent.config import KST
 from airlens_agent.sources import airkorea
 
@@ -70,3 +74,57 @@ def test_short_sido_variants():
              "세종특별자치시": "세종", "": None, "미상 어딘가": None}
     for addr, expected in cases.items():
         assert airkorea.short_sido(addr) == expected, addr
+
+
+FAKE_KEY = "FAKE-DATA-GO-KR-KEY/0123+456789=="
+XML_ERROR = (
+    "<OpenAPI_ServiceResponse><cmmMsgHeader><errMsg>SERVICE ERROR</errMsg>"
+    "<returnReasonCode>30</returnReasonCode></cmmMsgHeader></OpenAPI_ServiceResponse>"
+)
+
+
+def _reply(**kw) -> httpx.Response:
+    return httpx.Response(200, **kw)
+
+
+def _header(code: str, msg: str = "") -> dict:
+    return {"response": {"header": {"resultCode": code, "resultMsg": msg},
+                         "body": {"items": []}}}
+
+
+def test_result_code_error_raises(monkeypatch):
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", FAKE_KEY)
+    resp = _reply(json=_header("22", "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR"))
+    with pytest.raises(http.HttpError, match="22"):
+        airkorea._payload(resp, "airkorea.realtime")
+
+
+def test_nodata_and_normal_codes_pass():
+    assert airkorea.parse_realtime(airkorea._payload(_reply(json=_header("03")), "op")) == []
+    assert airkorea._payload(_reply(json=_header("00", "NORMAL_CODE")), "op")
+    assert airkorea._payload(_reply(json=REALTIME), "op") is not None  # no header at all
+
+
+def test_xml_gateway_error_raises():
+    with pytest.raises(http.HttpError, match="non-JSON"):
+        airkorea._payload(_reply(text=XML_ERROR), "airkorea.forecast")
+
+
+def test_non_json_body_is_redacted(monkeypatch):
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", FAKE_KEY)
+    with pytest.raises(http.HttpError) as exc:
+        airkorea._payload(_reply(text=f"denied for {FAKE_KEY}"), "airkorea.stations")
+    assert "***" in str(exc.value) and FAKE_KEY not in str(exc.value)
+
+
+def test_capped_realtime_makes_no_request(conn, monkeypatch):
+    monkeypatch.setenv("DATA_GO_KR_SERVICE_KEY", FAKE_KEY)
+
+    def no_client(*_a, **_kw):
+        raise AssertionError("an HTTP request was made past the daily cap")
+
+    monkeypatch.setattr(http.httpx, "Client", no_client)
+    for _ in range(30):
+        quota.reserve(conn, "airkorea.realtime")
+    with pytest.raises(quota.QuotaExceeded):
+        airkorea.fetch_realtime_nation(conn)
