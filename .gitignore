@@ -14,3 +14,5 @@ __pycache__/
 
 # 내려받은 자료·DB·사진 (에어코리아 자료는 공공누리 제3유형이라 저장소에 넣지 않는다)
 data/
+.ruff_cache/
+.pytest_cache/
