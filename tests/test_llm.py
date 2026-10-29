@@ -85,6 +85,20 @@ def test_tool_calls_parsed_with_invalid_arguments(conn):
     assert res.message["tool_calls"] == calls and res.message["role"] == "assistant"
 
 
+def test_tool_call_arguments_that_arrive_already_parsed_are_accepted(conn):
+    def call(cid, arguments):
+        return {"id": cid, "type": "function", "function": {"name": "wind", "arguments": arguments}}
+
+    calls = [call("c1", {"level": "10m"}), call("c2", {}), call("c3", '{"level": "10m"}')]
+    transport, _ = _transport(_reply(content=None, tool_calls=calls, finish="tool_calls"))
+    res = llm.chat("meta", [], ledger=conn, transport=transport)  # a billed reply: no exception
+    assert [c["arguments"] for c in res.tool_calls] == [{"level": "10m"}, {}, {"level": "10m"}]
+    # the raw text of a parsed object is its JSON dump; a string is kept as the server sent it
+    assert [c["raw_arguments"] for c in res.tool_calls] == [
+        json.dumps({"level": "10m"}), "{}", '{"level": "10m"}']
+    assert quota.spent(conn, "meta") == pytest.approx((1000 * 0.10 + 500 * 0.20) / 1e6)
+
+
 def test_cost_and_ledger_charge(conn):
     usage = {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000,
              "prompt_tokens_details": {"cached_tokens": 400_000}}
@@ -191,6 +205,23 @@ def test_json_chat_retries_once_after_invalid_answer(conn):
     rf = seen[0]["body"]["response_format"]["json_schema"]
     assert rf["strict"] is True and rf["name"] == "answer"
     assert res.cost_usd == pytest.approx(2 * (1000 * 1.25 + 500 * 4.25) / 1e6)
+
+
+@pytest.mark.parametrize(("first", "resent"), [
+    ("", False), (" \n ", False),  # nothing to show the model: only the correction request
+    ("not json", True),
+])
+def test_json_chat_retry_does_not_resend_an_empty_reply(conn, first, resent):
+    transport, seen = _transport(_reply(first), _reply('{"label": "a", "score": 1}'))
+    obj, _ = llm.json_chat("meta", [{"role": "user", "content": "q"}], Answer,
+                           schema_name="answer", ledger=conn, transport=transport)
+    assert obj == Answer(label="a", score=1.0)
+    retry = seen[1]["body"]["messages"]
+    expected = ["user", "assistant", "user"] if resent else ["user", "user"]
+    assert [m["role"] for m in retry] == expected
+    assert retry[0] == {"role": "user", "content": "q"}
+    assert retry[-1]["content"].startswith("That answer was invalid (")
+    assert all(m["content"] for m in retry)  # no empty message goes back to the API
 
 
 def test_json_chat_raises_after_second_failure(conn):
