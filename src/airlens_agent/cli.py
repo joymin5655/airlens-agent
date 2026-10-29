@@ -73,20 +73,31 @@ def _event_dir(name: str):
 
 
 def _pick_candidate(conn, name: str, event_id: str | None):
-    """--event-id, else the top-severity regional candidate of the event.
+    """--event-id, else the top-severity regional candidate inside the event's focus bbox.
 
     Not the key day's: the key day picks satellite images, and the strongest impact can come
-    days later (the 2025 Uiseong smoke peaked on 03-25, three days after ignition).
+    days later (the 2025 Uiseong smoke peaked on 03-25, three days after ignition). Inside the
+    focus bbox because the event's model grid and satellite images only cover that area; when
+    no candidate lies there, the top one overall is used with a warning.
     """
     if event_id:
         found = store.candidate(conn, event_id)
         if found is None:
             raise SystemExit(f"no candidate {event_id!r} in event {name!r}")
         return found
-    row = conn.execute(  # ts and event_id break severity ties the same way every run
-        "SELECT event_id FROM candidates WHERE kind = 'regional' "
-        "ORDER BY severity DESC, ts, event_id LIMIT 1"
+    regional = "SELECT event_id FROM candidates WHERE kind = 'regional' "
+    order = "ORDER BY severity DESC, ts, event_id LIMIT 1"  # ties go the same way every run
+    w, s, e, n = get_event(name).focus_bbox
+    row = conn.execute(
+        regional + "AND centroid_lon BETWEEN ? AND ? AND centroid_lat BETWEEN ? AND ? " + order,
+        (w, e, s, n),
     ).fetchone()
+    if row is None:
+        row = conn.execute(regional + order).fetchone()
+        if row is not None:
+            print(f"warning: no regional candidate inside the focus bbox of {name!r}; {row[0]} "
+                  "lies outside it, so wind, CAMS and satellite evidence may be missing",
+                  file=sys.stderr)
     if row is None:
         raise SystemExit(f"no regional candidates in event {name!r}; run `replay {name}` first")
     return store.candidate(conn, row[0])

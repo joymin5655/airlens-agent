@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from datetime import date, datetime
 
@@ -120,6 +121,32 @@ def test_investigate_breaks_severity_ties_by_time_then_event_id(data_dir, monkey
     _fake_agent(monkeypatch, seen)
     cli.main(["investigate", EVENT])
     assert seen["triage"] == "evt-b"  # the earliest time, then the lowest id
+
+
+def _far(event_id, severity):
+    """A candidate in the southeast, outside the dust event's focus bbox (and its model grid)."""
+    return dataclasses.replace(
+        make_candidate(event_id, severity=severity), centroid_lat=35.54, centroid_lon=129.19)
+
+
+def test_investigate_prefers_the_top_candidate_inside_the_focus_bbox(data_dir, monkeypatch, capsys):
+    _event_db(EVENT, [_far("evt-far", 9.0), make_candidate("evt-inside", severity=3.0)])
+    seen = {}
+    _fake_agent(monkeypatch, seen)
+    cli.main(["investigate", EVENT])
+    assert seen["triage"] == "evt-inside"  # the grid and the images exist there
+    assert "warning" not in capsys.readouterr().err
+
+
+def test_investigate_falls_back_to_a_candidate_outside_the_bbox_with_a_warning(
+    data_dir, monkeypatch, capsys
+):
+    _event_db(EVENT, [_far("evt-far", 9.0), _far("evt-far-low", 2.0)])
+    seen = {}
+    _fake_agent(monkeypatch, seen)
+    cli.main(["investigate", EVENT])
+    assert seen["triage"] == "evt-far"
+    assert "evt-far lies outside" in capsys.readouterr().err
 
 
 def test_the_summary_and_the_report_file_show_a_triage_fallback(data_dir, monkeypatch, capsys):
