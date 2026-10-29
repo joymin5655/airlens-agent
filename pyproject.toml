@@ -11,6 +11,9 @@ dependencies = [
     "uvicorn",
     "python-dotenv",
     "pillow>=13.0.0",
+    "meta-sam-parser>=0.1.0",
+    "pydantic>=2.14.1",
+    "numpy>=2.5.4",
 ]
 
 [project.scripts]
