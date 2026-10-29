@@ -259,7 +259,7 @@ def test_the_detector_summary_is_evidence_e1_and_claims_can_cite_it(event_db, co
     assert report.unverified_claims == [] and len(fake.on("api.meta.ai")) == 2  # no repair needed
     prompt = fake.on("api.meta.ai")[0]["messages"][1]["content"]
     assert "evidence E1" in prompt and "E2, E3" in prompt
-    for request in fake.on("api.meta.ai"):  # the system prompt and the final request agree
+    for request in fake.on("api.meta.ai"):  # the system message and the final request agree
         assert "E1" in request["messages"][0]["content"]
     assert "E1" in fake.on("api.meta.ai")[1]["messages"][-1]["content"]
 
