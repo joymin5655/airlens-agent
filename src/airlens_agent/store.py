@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -133,11 +133,99 @@ def observations_between(conn: sqlite3.Connection, start: datetime, end: datetim
     return df
 
 
-def hotspots_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> pd.DataFrame:
-    """Hotspots with start <= ts_utc <= end (timestamps stored as UTC ISO strings)."""
-    df = pd.read_sql_query("SELECT * FROM hotspots", conn)
+_TS_PAD = timedelta(days=1)  # covers any UTC offset when ts_utc strings carry another one
+
+
+def _hotspots(conn, where: str, args: list, start: datetime, end: datetime) -> pd.DataFrame:
+    """Filter on a padded time range in SQL (strings), then exactly in pandas."""
+    cur = conn.execute(
+        f"SELECT * FROM hotspots WHERE {where} ts_utc >= ? AND ts_utc <= ?",
+        [*args, _utc_iso(start - _TS_PAD), _utc_iso(end + _TS_PAD)],
+    )
+    df = pd.DataFrame(cur.fetchall(), columns=[c[0] for c in cur.description])
     df["ts_utc"] = pd.to_datetime(df["ts_utc"], format="ISO8601", utc=True)
     return df[(df["ts_utc"] >= start) & (df["ts_utc"] <= end)].reset_index(drop=True)
+
+
+def _utc_iso(ts: datetime) -> str:
+    return ts.astimezone(UTC).isoformat()
+
+
+def hotspots_between(conn: sqlite3.Connection, start: datetime, end: datetime) -> pd.DataFrame:
+    """Hotspots with start <= ts_utc <= end (timestamps stored as UTC ISO strings)."""
+    return _hotspots(conn, "", [], start, end)
+
+
+def hotspots_in(
+    conn: sqlite3.Connection,
+    bbox: tuple[float, float, float, float],
+    start: datetime,
+    end: datetime,
+) -> pd.DataFrame:
+    """Hotspots inside bbox (west, south, east, north) with start <= ts_utc <= end."""
+    west, south, east, north = bbox
+    where = "lon >= ? AND lon <= ? AND lat >= ? AND lat <= ? AND"
+    return _hotspots(conn, where, [west, east, south, north], start, end)
+
+
+def grid_samples_near(
+    conn: sqlite3.Connection,
+    lat: float,
+    lon: float,
+    start: datetime,
+    end: datetime,
+    *,
+    source: str | None = None,
+    max_km: float = 60.0,
+) -> list[GridSample]:
+    """Samples at the grid point nearest to (lat, lon) with start <= ts <= end, oldest first.
+
+    Empty when no point lies within max_km. `source` limits the rows (e.g. "openmeteo.cams").
+    """
+    from .detect import haversine_km  # detect imports store, so import it lazily
+
+    where, args = "ts >= ? AND ts <= ?", [_iso(start.astimezone(KST)), _iso(end.astimezone(KST))]
+    if source is not None:
+        where, args = where + " AND source = ?", [*args, source]
+    points = conn.execute(f"SELECT DISTINCT lat, lon FROM grid_samples WHERE {where}", args)
+    best = min(
+        points.fetchall(), key=lambda p: haversine_km(lat, lon, p[0], p[1]), default=None
+    )
+    if best is None or haversine_km(lat, lon, best[0], best[1]) > max_km:
+        return []
+    rows = conn.execute(
+        f"SELECT lat, lon, ts, source, variables FROM grid_samples "
+        f"WHERE lat = ? AND lon = ? AND {where} ORDER BY ts",
+        [best[0], best[1], *args],
+    ).fetchall()
+    return [
+        GridSample(la, lo, datetime.fromisoformat(ts), src, json.loads(variables))
+        for la, lo, ts, src, variables in rows
+    ]
+
+
+def candidate(conn: sqlite3.Connection, event_id: str) -> Candidate | None:
+    """The stored candidate `event_id`, or None."""
+    cur = conn.execute("SELECT * FROM candidates WHERE event_id = ?", (event_id,))
+    row = cur.fetchone()
+    if row is None:
+        return None
+    d = dict(zip([c[0] for c in cur.description], row, strict=True))
+    return Candidate(
+        event_id=d["event_id"],
+        ts=datetime.fromisoformat(d["ts"]).astimezone(KST),
+        kind=d["kind"],
+        hint=d["hint"],
+        station_keys=json.loads(d["station_keys"] or "[]"),
+        centroid_lat=d["centroid_lat"],
+        centroid_lon=d["centroid_lon"],
+        bbox=tuple(json.loads(d["bbox"])),
+        peak_pm10=d["peak_pm10"],
+        peak_pm25=d["peak_pm25"],
+        ratio_pm25_pm10=d["ratio_pm25_pm10"],
+        severity=d["severity"],
+        features=json.loads(d["features"] or "{}"),
+    )
 
 
 def latest_candidates(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:

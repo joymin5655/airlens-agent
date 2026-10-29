@@ -95,13 +95,17 @@ def _parse_tool_calls(raw: list[dict]) -> list[dict]:
     calls = []
     for call in raw:
         fn = call.get("function") or {}
-        text = fn.get("arguments") or ""
-        try:
-            args = json.loads(text) if text else {}
-        except json.JSONDecodeError:
-            args = None
-        if not isinstance(args, dict):
-            args = None  # the agent returns an error to the model instead of guessing
+        arguments = fn.get("arguments")
+        if isinstance(arguments, dict):  # some servers send them already parsed: use as they are
+            args, text = arguments, json.dumps(arguments)
+        else:
+            text = arguments or ""
+            try:
+                args = json.loads(text) if text else {}
+            except json.JSONDecodeError:
+                args = None
+            if not isinstance(args, dict):
+                args = None  # the agent returns an error to the model instead of guessing
         calls.append(
             {"id": call.get("id"), "name": fn.get("name"), "arguments": args, "raw_arguments": text}
         )
@@ -258,12 +262,11 @@ def json_chat(
         except (ValidationError, ValueError) as exc:
             if attempt == 1:
                 raise
-            msgs += [
-                {"role": "assistant", "content": res.content},
-                {
-                    "role": "user",
-                    "content": f"That answer was invalid ({str(exc)[:600]}). "
-                    "Reply again with only the corrected JSON object.",
-                },
-            ]
+            if res.content.strip():  # an empty assistant message would not be accepted back
+                msgs.append({"role": "assistant", "content": res.content})
+            msgs.append({
+                "role": "user",
+                "content": f"That answer was invalid ({str(exc)[:600]}). "
+                "Reply again with only the corrected JSON object.",
+            })
     raise AssertionError("unreachable")
