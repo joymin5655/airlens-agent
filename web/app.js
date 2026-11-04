@@ -35,6 +35,10 @@ const MODEL = {
   "meta-models/muse-spark-open-1026": "Muse Spark Open on Baseten",
   "muse-spark-1.3-contributor": "Muse Spark 1.3 on the Meta API",
   "gpt-6-luna": "GPT-6 Luna on OpenAI",
+  // the model comparison names each model by its provider
+  meta: "Muse Spark 1.3 on the Meta API",
+  baseten: "Muse Spark Open on Baseten",
+  openai: "GPT-6 Luna on OpenAI",
 };
 const modelName = (m) => MODEL[m] || m;
 const KST = new Intl.DateTimeFormat("en-GB", {
