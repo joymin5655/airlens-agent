@@ -5,7 +5,7 @@ import json
 import sys
 from datetime import datetime, timedelta
 
-from . import agent, config, detect, http, quota, replay, store, tools
+from . import agent, ask, config, detect, http, monitor, quota, replay, store, tools
 from .events import get_event
 from .sources import airkorea, firms, gibs, sam
 
@@ -156,6 +156,19 @@ def cmd_investigate(args) -> dict:
     }
 
 
+def cmd_eval(args) -> dict:
+    from . import evaluate  # evaluate imports this module
+
+    models = [m for m in args.models.split(",") if m]
+    events = [e for e in args.events.split(",") if e]
+    try:
+        result = evaluate.run(events, models, args.runs, ledger=_live())
+    except evaluate.EvalError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(evaluate.render_tables(result))
+    return {"saved": "eval/latest.json", "investigations": len(result["results"])}
+
+
 def cmd_sam_trial(args) -> dict:
     ev = get_event(args.name)
     ledger = _live()
@@ -193,6 +206,23 @@ def cmd_sam_trial(args) -> dict:
     return summary
 
 
+def cmd_monitor(args) -> dict:
+    return monitor.run_once(
+        investigate=not args.no_investigate, max_investigations=args.max_investigations
+    )
+
+
+def cmd_ask(args) -> dict:
+    conn = _live()
+    if args.build_examples:
+        return ask.build_examples(ledger=conn, live_conn=conn)
+    if not args.question:
+        raise SystemExit("give a question, or --build-examples")
+    return ask.answer(
+        args.question, ledger=conn, live_conn=conn, lat=args.lat, lon=args.lon
+    ).model_dump()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="airlens-agent")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -208,13 +238,28 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("investigate")
     p.add_argument("name")
     p.add_argument("--event-id")
-    p.add_argument("--investigator", choices=("meta", "baseten"), default="meta")
+    p.add_argument("--investigator", choices=("meta", "baseten", "openai"), default="meta")
     p.add_argument("--max-steps", type=int, default=8)
     p.set_defaults(fn=cmd_investigate)
+    p = sub.add_parser("eval")
+    p.add_argument("--models", default="meta,baseten,openai")
+    p.add_argument("--runs", type=int, default=2)
+    p.add_argument("--events", default="fire-2025-03,dust-2026-02")
+    p.set_defaults(fn=cmd_eval)
     p = sub.add_parser("sam-trial")
     p.add_argument("name")
     p.add_argument("--prompt", action="append")
     p.set_defaults(fn=cmd_sam_trial)
+    p = sub.add_parser("monitor")
+    p.add_argument("--no-investigate", action="store_true")
+    p.add_argument("--max-investigations", type=int, default=1)
+    p.set_defaults(fn=cmd_monitor)
+    p = sub.add_parser("ask")
+    p.add_argument("question", nargs="?")
+    p.add_argument("--lat", type=float)
+    p.add_argument("--lon", type=float)
+    p.add_argument("--build-examples", action="store_true")
+    p.set_defaults(fn=cmd_ask)
     args = parser.parse_args(argv)
     result = args.fn(args)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

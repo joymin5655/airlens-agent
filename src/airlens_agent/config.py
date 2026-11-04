@@ -30,9 +30,12 @@ QUOTA_CAPS: dict[str, int] = {
     "airkorea.forecast": 6,
     "airkorea.stations": 3,
     # Daily dev safety caps for paid model calls; the USD ledger (SPEND_CAPS) is the real limit.
-    "meta.chat": 400,
+    # one citizen question = up to 6 meta.chat calls, so 300 asks/day need about 1800 of them
+    "meta.chat": 2400,
     "meta.sam": 300,
     "baseten.chat": 400,
+    "site.ask": 300,  # citizen questions per day (ask.answer)
+    "openai.chat": 400,
 }
 
 META_API_BASE = "https://api.meta.ai/v1"
@@ -40,12 +43,25 @@ BASETEN_API_BASE = "https://inference.baseten.co/v1"
 MUSE_SPARK_MODEL = "muse-spark-1.3-contributor"
 MUSE_SPARK_OPEN_MODEL = "meta-models/muse-spark-open-1026"
 SAM_MODEL = "sam-3.1"
+OPENAI_API_BASE = "https://api.openai.com/v1"
+OPENAI_MODEL = os.environ.get("AIRLENS_OPENAI_MODEL") or "gpt-6-luna"  # comparison baseline
 
 # All-time USD budget per provider (dev and test share it); override with AIRLENS_BUDGET_<P>_USD.
 SPEND_CAPS: dict[str, float] = {
     "meta": float(os.environ.get("AIRLENS_BUDGET_META_USD") or 40.0),
     "baseten": float(os.environ.get("AIRLENS_BUDGET_BASETEN_USD") or 40.0),
+    # hard all-time cap for the OpenAI baseline: the env var may lower it, never raise it
+    "openai": min(5.0, float(os.environ.get("AIRLENS_BUDGET_OPENAI_USD") or 5.0)),
 }
+
+# Live monitor caps. Daily USD per provider (KST day; a provider not listed has no daily cap),
+# override with AIRLENS_DAILY_<PROVIDER>_USD; investigations per KST day for the hourly job.
+DAILY_SPEND_CAPS: dict[str, float] = {
+    "meta": float(os.environ.get("AIRLENS_DAILY_META_USD") or 5.0),
+    "baseten": float(os.environ.get("AIRLENS_DAILY_BASETEN_USD") or 3.0),
+}
+MONITOR_INVESTIGATIONS_PER_DAY = int(os.environ.get("AIRLENS_MONITOR_PER_DAY") or 4)
+QUOTA_CAPS["monitor.investigate"] = MONITOR_INVESTIGATIONS_PER_DAY
 
 
 class MissingKeyError(RuntimeError):
@@ -75,12 +91,32 @@ def baseten_api_key() -> str:
     return _require("BASETEN_API_KEY")
 
 
+def openai_api_key() -> str:
+    return _require("OPENAI_API_KEY")
+
+
 def data_dir() -> Path:
     return Path(os.environ.get("AIRLENS_AGENT_DATA") or MAIN_ROOT / "data")
 
 
 def live_db_path() -> Path:
     return data_dir() / "live.sqlite"
+
+
+def ledger_db_path() -> Path:
+    """The spend ledger this process writes: AIRLENS_LEDGER_FILE, else the live DB.
+
+    Modal: the hourly job writes live.sqlite, the web container its own file, so two containers
+    never write one file. Paid calls must charge a connection to this path.
+    """
+    return Path(os.environ.get("AIRLENS_LEDGER_FILE") or live_db_path())
+
+
+def peer_ledger_paths() -> list[Path]:
+    """Other writers' ledger files (AIRLENS_LEDGER_PEERS, os.pathsep separated), summed
+    read-only into the budget checks so the caps hold across containers."""
+    raw = os.environ.get("AIRLENS_LEDGER_PEERS", "")
+    return [Path(p) for p in raw.split(os.pathsep) if p]
 
 
 def event_db_path(name: str) -> Path:
