@@ -134,7 +134,11 @@ def _stats(rows: list[dict]) -> dict:
             round(sum(r["claims_verified"] for r in rows) / claims, 3) if claims else None
         ),
         "median_latency_s": round(statistics.median(r["wall_s"] for r in rows), 1),
-        "mean_cost_usd": round(statistics.fmean(r["cost_usd"] for r in rows), 4),
+        # The whole case: the model's own calls plus paid tools billed elsewhere (SAM 3.1 runs on
+        # the Meta API, so for Meta it is already inside cost_usd).
+        "mean_cost_usd": round(
+            statistics.fmean(r["cost_usd"] + r["tool_cost_usd"] for r in rows), 4
+        ),
         "failures": sum(1 for r in rows if r["failed"]),
     }
 

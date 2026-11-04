@@ -132,12 +132,13 @@ def test_table_rendering():
     rows = [
         {"event": DUST, "model": "meta", "run": r, "correct": ok, "confidence": 0.8,
          "claims_total": 2, "claims_verified": 1, "wall_s": w, "cost_usd": 0.01,
-         "failed": not ok}
+         "tool_cost_usd": 0.0025, "failed": not ok}
         for r, ok, w in ((1, True, 10.0), (2, False, 20.0))
     ]
     text = evaluate.render_tables({"summary": evaluate.summarize(rows)})
     assert "### meta" in text
-    assert f"| {DUST} | 1/2 | 0.8 | 50% | 15.0 | 0.0100 | 1 |" in text
+    # cost per case counts paid tools too (SAM 3.1 is billed to Meta whichever model runs)
+    assert f"| {DUST} | 1/2 | 0.8 | 50% | 15.0 | 0.0125 | 1 |" in text
     assert "| all | 1/2 |" in text
 
 
