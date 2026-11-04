@@ -8,6 +8,9 @@ Frontier"). **Built with Muse Spark Open.**
 
 - Live site: https://joymin5655--airlens-agent-web.us-east.modal.run
 
+![The investigation page: the March 2025 Gyeongbuk wildfire case, SAM 3.1's smoke mask over the
+NASA satellite image beside the agent's verdict and evidence](docs/site-investigation.jpg)
+
 ## What it does
 
 **Investigates pollution events.** Every hour a monitor reads all AirKorea stations (about 670)
