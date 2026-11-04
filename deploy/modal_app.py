@@ -110,11 +110,12 @@ def push_from_cron() -> None:
 
 
 def pull_for_web() -> None:
-    """Local copies of everything the site reads. Our own ledger is restored only when missing
-    (the local file is newer than any upload)."""
+    """Local copies of everything the site reads: the live snapshot, the past events, the saved
+    example answers (ask/) and the latest model comparison (eval/). Our own ledger is restored
+    only when missing (the local file is newer than any upload)."""
     vol, local = Path(VOL), Path(LOCAL)
-    _copy_tree(vol / "live", local / "live")
-    _copy_tree(vol / "events", local / "events")
+    for folder in ("live", "events", "ask", "eval"):
+        _copy_tree(vol / folder, local / folder)
     for name in ("live.sqlite", WEB_LEDGER):
         if (vol / name).exists() and (name == "live.sqlite" or not (local / name).exists()):
             _copy_file(vol / name, local / name)

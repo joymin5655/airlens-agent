@@ -12,8 +12,11 @@
 1. Secret `airlens-agent` from the local key file (values never go in git):
    `modal secret create airlens-agent DATA_GO_KR_SERVICE_KEY=... NASA_FIRMS_MAP_KEY=... MODEL_API_KEY=... BASETEN_API_KEY=...`
    (add `OPENAI_API_KEY`, `FIREWORKS_API_KEY` if used; empty values are fine). A convenient form:
+   `modal secret create airlens-agent --from-dotenv .env`.
 2. Data: `deploy/upload_data.sh` (past events `fire-2025-03`, `dust-2026-02` and the live DB, whose
-   spend table carries the model spend made so far into the cloud budget caps).
+   spend table carries the model spend made so far into the cloud budget caps; also the saved
+   example answers and the latest model comparison once they exist). Run it again after
+   `airlens-agent ask --build-examples` or `airlens-agent eval` to update the site.
 3. `modal deploy deploy/modal_app.py`
 4. Check: `modal run deploy/modal_app.py::monitor_hourly` once by hand, then open the web URL
    and `/health`.
