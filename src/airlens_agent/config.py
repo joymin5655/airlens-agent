@@ -30,9 +30,11 @@ QUOTA_CAPS: dict[str, int] = {
     "airkorea.forecast": 6,
     "airkorea.stations": 3,
     # Daily dev safety caps for paid model calls; the USD ledger (SPEND_CAPS) is the real limit.
-    "meta.chat": 400,
+    # one citizen question = up to 6 meta.chat calls, so 300 asks/day need about 1800 of them
+    "meta.chat": 2400,
     "meta.sam": 300,
     "baseten.chat": 400,
+    "site.ask": 300,  # citizen questions per day (ask.answer)
 }
 
 META_API_BASE = "https://api.meta.ai/v1"
