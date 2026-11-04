@@ -7,6 +7,7 @@ Built for the Meta Global AI Developer Hackathon (individual developer track, "P
 Frontier"). **Built with Muse Spark Open.**
 
 - Live site: https://joymin5655--airlens-agent-web.us-east.modal.run
+- Demo video: https://youtu.be/lfD47T8Z6Lw
 
 ![The investigation page: the March 2025 Gyeongbuk wildfire case, SAM 3.1's smoke mask over the
 NASA satellite image beside the agent's verdict and evidence](docs/site-investigation.jpg)
