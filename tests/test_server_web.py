@@ -205,6 +205,24 @@ def test_ask_per_client_limit(site, fake_answer):
     assert other.status_code == 200
 
 
+def test_made_up_forwarded_entries_do_not_dodge_the_limit(site, fake_answer):
+    """The edge proxy appends the address it saw; entries before it come from the client."""
+    for i in range(server.PER_MINUTE):
+        hdr = {"x-forwarded-for": f"10.0.0.{i}, 203.0.113.7"}
+        assert site.post("/api/ask", json={"question": "air?"}, headers=hdr).status_code == 200
+    hdr = {"x-forwarded-for": "10.9.9.9, 203.0.113.7"}
+    assert site.post("/api/ask", json={"question": "air?"}, headers=hdr).status_code == 429
+
+
+def test_idle_clients_are_forgotten(monkeypatch):
+    server._hits.clear()
+    monkeypatch.setattr(server, "MAX_CLIENTS", 2)
+    for name in ("a", "b", "c"):
+        server._hits[name].append(0.0)
+    assert server._rate_limited("d", 2 * 86400) is None
+    assert set(server._hits) == {"d"}
+
+
 def test_ask_failure_hides_the_traceback(site, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("secret detail /Users/x/file.py")

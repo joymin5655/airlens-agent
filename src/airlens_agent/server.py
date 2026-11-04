@@ -379,14 +379,21 @@ def eval_latest() -> dict:
 # ponytail: in-memory per-process limits keyed by client IP, reset on restart and not shared
 # between containers (Modal runs one web container). Upgrade: a counter table in the ledger DB.
 _hits: dict[str, deque] = defaultdict(deque)
+MAX_CLIENTS = 10_000  # beyond this, clients idle for a day are forgotten
 
 
 def _client(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for", "")
-    return fwd.split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    """The address the edge proxy saw: the last X-Forwarded-For entry. The first entries come
+    from the client and can be made up to dodge the per-client limit.
+    ponytail: assumes exactly one trusted proxy in front (Modal); upgrade: a trusted-hop count."""
+    fwd = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    return fwd[-1] if fwd else (request.client.host if request.client else "unknown")
 
 
 def _rate_limited(client: str, now: float) -> str | None:
+    if len(_hits) > MAX_CLIENTS:
+        for key in [k for k, v in _hits.items() if not v or now - v[-1] > 86400]:
+            del _hits[key]
     hits = _hits[client]
     while hits and now - hits[0] > 86400:
         hits.popleft()
