@@ -47,6 +47,15 @@ SPEND_CAPS: dict[str, float] = {
     "baseten": float(os.environ.get("AIRLENS_BUDGET_BASETEN_USD") or 40.0),
 }
 
+# Live monitor caps. Daily USD per provider (KST day; a provider not listed has no daily cap),
+# override with AIRLENS_DAILY_<PROVIDER>_USD; investigations per KST day for the hourly job.
+DAILY_SPEND_CAPS: dict[str, float] = {
+    "meta": float(os.environ.get("AIRLENS_DAILY_META_USD") or 5.0),
+    "baseten": float(os.environ.get("AIRLENS_DAILY_BASETEN_USD") or 3.0),
+}
+MONITOR_INVESTIGATIONS_PER_DAY = int(os.environ.get("AIRLENS_MONITOR_PER_DAY") or 4)
+QUOTA_CAPS["monitor.investigate"] = MONITOR_INVESTIGATIONS_PER_DAY
+
 
 class MissingKeyError(RuntimeError):
     pass
@@ -81,6 +90,22 @@ def data_dir() -> Path:
 
 def live_db_path() -> Path:
     return data_dir() / "live.sqlite"
+
+
+def ledger_db_path() -> Path:
+    """The spend ledger this process writes: AIRLENS_LEDGER_FILE, else the live DB.
+
+    Modal: the hourly job writes live.sqlite, the web container its own file, so two containers
+    never write one file. Paid calls must charge a connection to this path.
+    """
+    return Path(os.environ.get("AIRLENS_LEDGER_FILE") or live_db_path())
+
+
+def peer_ledger_paths() -> list[Path]:
+    """Other writers' ledger files (AIRLENS_LEDGER_PEERS, os.pathsep separated), summed
+    read-only into the budget checks so the caps hold across containers."""
+    raw = os.environ.get("AIRLENS_LEDGER_PEERS", "")
+    return [Path(p) for p in raw.split(os.pathsep) if p]
 
 
 def event_db_path(name: str) -> Path:
