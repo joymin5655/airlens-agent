@@ -19,5 +19,14 @@ done
 sqlite3 data/live.sqlite ".backup '$SNAP/live.sqlite'"
 modal volume put --force "$VOLUME" "$SNAP/live.sqlite" /live.sqlite
 
+# The saved example answers (shown when the daily question cap is reached) and the latest model
+# comparison, when they have been made (`airlens-agent ask --build-examples`, `airlens-agent eval`).
+if [ -f data/ask/examples.json ]; then
+  modal volume put --force "$VOLUME" data/ask/examples.json /ask/examples.json
+fi
+if [ -f data/eval/latest.json ]; then
+  modal volume put --force "$VOLUME" data/eval/latest.json /eval/latest.json
+fi
+
 rm -rf "$SNAP"
 modal volume ls "$VOLUME" /events
