@@ -297,7 +297,8 @@ def test_official_forecast_is_cached_per_day(live, monkeypatch):
     monkeypatch.setattr(airkorea, "fetch_forecast", fake)
     ctx = ask.AskContext(live, NOW)
     _, data, cites = ask.tool_official_forecast(ctx, {"day": "tomorrow"})
-    assert data["day"] == "2026-11-05" and data["pm10"]["grades"]["서울"] == "보통"
+    assert data["day"] == "2026-11-05" and data["pm10"]["grades"]["Seoul"] == "moderate"
+    assert "place_level" not in data  # no place given
     assert len(cites) == 2 and cites[0]["time"] == "2026-11-04 05:00"
     _, today, _ = ask.tool_official_forecast(ctx, {"day": "today"})
     assert "note" in today  # the bulletin has nothing for today in this fixture
@@ -391,3 +392,74 @@ def test_cli_ask(monkeypatch, capsys, tmp_path):
     assert cli.main(["ask", "Air in Seoul?", "--lat", "37.5", "--lon", "127"]) == 0
     assert seen == {"question": "Air in Seoul?", "lat": 37.5, "lon": 127.0}
     assert json.loads(capsys.readouterr().out)["answer"] == "ok"
+
+
+def fake_forecast(pm10, pm25):
+    def fake(conn, day):
+        issued = datetime(2026, 11, 4, 5, tzinfo=KST)
+        return [
+            Forecast(issued_at=issued, target_date=date(2026, 11, 5), pollutant="PM10",
+                     overall="Normal nationwide", cause="", grades=pm10),
+            Forecast(issued_at=issued, target_date=date(2026, 11, 5), pollutant="PM25",
+                     overall="Normal nationwide", cause="", grades=pm25),
+        ]
+
+    return fake
+
+
+def test_official_forecast_grades_the_asked_place(live, monkeypatch):
+    monkeypatch.setattr(airkorea, "fetch_forecast",
+                        fake_forecast({"서울": "보통", "부산": "좋음"}, {"서울": "나쁨"}))
+    ctx = ask.AskContext(live, NOW)
+    seoul = {"day": "tomorrow", "lat": 37.566, "lon": 126.978}
+    _, data, cites = ask.tool_official_forecast(ctx, seoul)
+    assert data["place_region"] == "Seoul" and data["place_level"] == "unhealthy"
+    assert data["pm10"]["grades"] == {"Seoul": "moderate", "Busan": "good"}
+    assert cites[1]["detail"] == "PM25 forecast for 2026-11-05, Seoul: unhealthy"
+    tokyo = {"day": "tomorrow", "lat": 35.68, "lon": 139.69}
+    _, far, _ = ask.tool_official_forecast(ctx, tokyo)
+    assert "place_level" not in far  # no AirKorea station within 30 km
+
+
+def test_split_province_takes_the_worse_region(live, monkeypatch):
+    suwon_station = Station("경기|인계동", "인계동", "경기", 37.264, 127.031, None, "t")
+    store.upsert_stations(live, [suwon_station])
+    monkeypatch.setattr(airkorea, "fetch_forecast", fake_forecast(
+        {"경기북부": "좋음", "경기남부": "나쁨"}, {"경기북부": "좋음", "경기남부": "보통"}))
+    suwon = {"day": "tomorrow", "lat": 37.26, "lon": 127.03}
+    _, data, _ = ask.tool_official_forecast(ask.AskContext(live, NOW), suwon)
+    assert data["place_region"] == "northern Gyeonggi and southern Gyeonggi"
+    assert data["place_level"] == "unhealthy"
+
+
+def test_risk_follows_the_official_forecast_over_cams(live, monkeypatch):
+    good = {"서울": "좋음"}
+    monkeypatch.setattr(airkorea, "fetch_forecast", fake_forecast(good, good))
+    FakeModel(monkeypatch, [
+        ("", [tc("f", "official_forecast", {"day": "tomorrow", "lat": 37.57, "lon": 126.98})]),
+        # this window reads 100 / 60 µg/m³: unhealthy on the CAMS model alone
+        ("", [tc("b", "cams_forecast", {"lat": 37.57, "lon": 126.98, "hours_ahead": 0})]),
+        ("ready",),
+    ], draft("The official forecast grades Seoul good for tomorrow.", ids=["E2", "E3"],
+             risk="unhealthy"))
+    out = ask.answer("Seoul air tomorrow?", ledger=live, live_conn=live, now=NOW,
+                     transport=network())
+    assert out.risk_level == "good"
+    assert out.risk_basis == "AirKorea official forecast for Seoul"
+
+
+def test_evidence_ids_are_cut_from_the_answer(live, monkeypatch):
+    FakeModel(monkeypatch, [
+        ("", [tc("l", "live_readings", {"lat": 37.57, "lon": 126.98})]),
+        ("ready",),
+    ], draft(
+        "The nearest stations read about 65 µg/m³ PM10 (E2). That is the moderate grade in E1.",
+        ids=["E2"], limits=["E1 grade band definitions were not retrieved",
+                            "No forecast was checked."],
+    ))
+    out = ask.answer("Seoul air now?", ledger=live, live_conn=live, now=NOW)
+    assert "E1" not in out.answer and "E2" not in out.answer
+    assert "65" in out.answer and out.answer.endswith("the moderate grade.")
+    assert "No forecast was checked." in out.limitations
+    assert not any("E1" in x for x in out.limitations)
+    assert out.risk_basis == "median of the nearest AirKorea stations"

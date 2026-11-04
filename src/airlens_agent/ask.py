@@ -42,6 +42,19 @@ STALE_HOURS = 6
 BANDS = {"pm10": (30, 80, 150), "pm25": (15, 35, 75)}
 LEVELS = ("good", "moderate", "unhealthy", "very_unhealthy")
 GRADE_KO = {"좋음": "good", "보통": "moderate", "나쁨": "unhealthy", "매우나쁨": "very_unhealthy"}
+# The regions of the AirKorea forecast bulletin, in English for the model and the site.
+REGION_EN = {
+    "서울": "Seoul", "인천": "Incheon", "경기북부": "northern Gyeonggi",
+    "경기남부": "southern Gyeonggi", "영서": "western Gangwon", "영동": "eastern Gangwon",
+    "대전": "Daejeon", "세종": "Sejong", "충남": "South Chungcheong", "충북": "North Chungcheong",
+    "광주": "Gwangju", "전북": "North Jeolla", "전남": "South Jeolla", "부산": "Busan",
+    "대구": "Daegu", "울산": "Ulsan", "경북": "North Gyeongsang", "경남": "South Gyeongsang",
+    "제주": "Jeju",
+}
+# A station province (`stations.sido`) that the bulletin splits in two takes the worse grade.
+# ponytail: no district-level match (upgrade: map each station to its bulletin region).
+PROVINCE_REGIONS = {"경기": ("경기북부", "경기남부"), "강원": ("영서", "영동"),
+                    "전남광주": ("광주", "전남")}
 
 SAFETY_NOTE = (
     "Air-quality risk information only, not health or medical advice; for personal decisions "
@@ -70,6 +83,8 @@ _ADVICE = re.compile(
     re.I,
 )
 _SENTENCE = re.compile(r"(?<=[.!?])\s+")
+# Evidence ids are internal: "(E2)", "in E1" and a bare "E3" are cut from the answer text.
+_EVIDENCE_ID = re.compile(r"\s*\((?:E\d+[,;\s]*)+\)|\s+(?:in|from|see|per)\s+E\d+\b|\bE\d+\b")
 
 
 # --- answer model -----------------------------------------------------------------------------
@@ -86,6 +101,7 @@ class Citation(BaseModel):
 class Answer(BaseModel):
     answer: str
     risk_level: RiskLevel = "unknown"
+    risk_basis: str = ""  # where the risk level comes from, for the site to show
     time_window: str = ""
     confidence: float = Field(default=0.0, ge=0, le=1)
     citations: list[Citation] = []
@@ -125,14 +141,20 @@ def _worst(pm10: float | None, pm25: float | None) -> RiskLevel | None:
     return LEVELS[max(grades)] if grades else None
 
 
-def derive_risk(items: list[dict]) -> RiskLevel | None:
-    """The level the evidence itself gives: the worse of the PM10 and PM2.5 grades.
+def derive_risk(items: list[dict]) -> tuple[RiskLevel, str] | None:
+    """The level the evidence itself gives (the worse of PM10 and PM2.5) and where it comes from.
 
-    The asked window's CAMS mean first, else the nearest stations' median now. The official
-    forecast has grades per region, which code cannot match to the asked place; the model's
-    reading of it is used instead (see `answer`).
+    The official AirKorea forecast for the asked place's region first: it is the authoritative
+    Korean forecast, and the global CAMS model often reads higher over Korea. Then the asked
+    window's CAMS mean, then the nearest stations' median now. A forecast called without a place
+    has no region match; the model's reading of it is used instead (see `_build`).
     """
-    for tool in ("cams_forecast", "live_readings"):
+    for item in items:
+        d = item["data"]
+        if item.get("tool") == "official_forecast" and d.get("place_level"):
+            return d["place_level"], f"AirKorea official forecast for {d['place_region']}"
+    for tool, basis in (("cams_forecast", "CAMS model forecast for the asked window"),
+                        ("live_readings", "median of the nearest AirKorea stations")):
         for item in items:
             if item.get("tool") != tool:
                 continue
@@ -143,7 +165,7 @@ def derive_risk(items: list[dict]) -> RiskLevel | None:
             else:
                 level = _worst(d.get("median_pm10"), d.get("median_pm25"))
             if level:
-                return level
+                return level, basis
     return None
 
 
@@ -265,27 +287,53 @@ def _forecast_items(conn: sqlite3.Connection, issue_day: date) -> list[dict]:
     return items
 
 
+def _regions(ctx: AskContext, args: dict) -> tuple[str, ...]:
+    """The bulletin regions of the asked place: those of the province of the nearest AirKorea
+    station within 30 km; () without a place or outside the station network."""
+    if args.get("lat") is None or args.get("lon") is None:
+        return ()
+    lat, lon = _num(args, "lat", -90, 90), _num(args, "lon", -180, 180)
+    rows = ctx.conn.execute(
+        "SELECT sido, lat, lon FROM stations WHERE lat IS NOT NULL AND lon IS NOT NULL"
+    ).fetchall()
+    near = min(((float(haversine_km(lat, lon, la, lo)), sido) for sido, la, lo in rows),
+               default=None)
+    if near is None or near[0] > 30:
+        return ()
+    return PROVINCE_REGIONS.get(near[1], (near[1],))
+
+
 def tool_official_forecast(ctx: AskContext, args: dict) -> tuple[str, dict, list[dict]]:
     day = args.get("day", "today")
     if day not in ("today", "tomorrow"):
         raise tools.ToolError("day must be 'today' or 'tomorrow'")
+    regions = _regions(ctx, args)
+    name = " and ".join(REGION_EN.get(r, r) for r in regions)
     issue = ctx.now.astimezone(KST).date()
     target = (issue + timedelta(days=1 if day == "tomorrow" else 0)).isoformat()
     items = _forecast_items(ctx.writable, issue)
     data: dict = {"day": target}
-    cites = []
+    cites, place = [], []
     for code, key in (("PM10", "pm10"), ("PM25", "pm25")):
         # several bulletins a day: the newest one for this target
         mine = [i for i in items if i["target"] == target and i["pollutant"] == code]
         if not mine:
             continue
         top = max(mine, key=lambda i: i["issued"])
-        data[key] = {k: top[k] for k in ("overall", "cause", "grades")}
+        grades = {REGION_EN.get(r, r): GRADE_KO.get(g, g) for r, g in top["grades"].items()}
+        data[key] = {"overall": top["overall"], "cause": top["cause"], "grades": grades}
         data["issued"] = _fmt(top["issued"])
-        cites.append({
-            "source": SOURCE_FORECAST, "detail": f"{code} forecast for {target}: "
-            f"{top['overall'][:160]}", "value": None, "unit": "", "time": _fmt(top["issued"]),
-        })
+        detail = f"{code} forecast for {target}: {top['overall'][:160]}"
+        here = [GRADE_KO[top["grades"][r]] for r in regions if top["grades"].get(r) in GRADE_KO]
+        if here:
+            level = max(here, key=LEVELS.index)
+            data[key]["place_grade"] = level
+            place.append(level)
+            detail = f"{code} forecast for {target}, {name}: {level.replace('_', ' ')}"
+        cites.append({"source": SOURCE_FORECAST, "detail": detail, "value": None, "unit": "",
+                      "time": _fmt(top["issued"])})
+    if place:
+        data["place_region"], data["place_level"] = name, max(place, key=LEVELS.index)
     if len(data) == 1:
         data["note"] = "the bulletins carry no forecast for this day (Korea only)"
     return SOURCE_FORECAST, data, cites
@@ -367,9 +415,11 @@ ASK_TOOLS = {
         ["lat", "lon"])),
     "official_forecast": (tool_official_forecast, _spec(
         "official_forecast",
-        "The AirKorea official PM10 and PM2.5 forecast: overall text, cause and the grade per "
-        "region (좋음 good, 보통 normal, 나쁨 bad, 매우나쁨 very bad). South Korea only.",
-        {"day": {"type": "string", "enum": ["today", "tomorrow"]}})),
+        "The AirKorea official PM10 and PM2.5 forecast for today or tomorrow: overall text and "
+        "cause (in Korean) and the grade per region (good, moderate, unhealthy, "
+        "very_unhealthy). Pass the place's lat and lon to get its region's grade. South Korea "
+        "only.",
+        {"day": {"type": "string", "enum": ["today", "tomorrow"]}, "lat": _LAT, "lon": _LON})),
     "cams_forecast": (tool_cams_forecast, _spec(
         "cams_forecast",
         "CAMS model forecast for a window at a point, worldwide: mean and max of PM10, PM2.5, "
@@ -411,8 +461,10 @@ SYSTEM = (
     "You answer citizens' questions about air quality using tools. You give air-quality risk "
     "information only, never health or medical advice. Use only the tools' results; call only "
     "the tools you need (geocode first for a named place; live_readings and official_forecast "
-    "cover South Korea only, cams_forecast works worldwide). Evidence ids: E1 holds the AirKorea "
-    "grade bands, tool results are numbered after it. Questions such as 'should I run, "
+    "cover South Korea only, cams_forecast works worldwide; for a place in South Korea pass its "
+    "lat and lon to official_forecast). Evidence ids: E1 always holds the AirKorea grade bands, "
+    "tool results are numbered after it; never write evidence ids in the answer or the "
+    "limitations. Questions such as 'should I run, "
     "exercise, wear a mask or take medicine' are personal health decisions: do not recommend or "
     "advise anything; report the forecast values and grades, state what the official grade "
     "definitions in E1 mean, and say that personal decisions should follow official guidance "
@@ -475,20 +527,25 @@ def _build(draft: AnswerDraft, ctx: AskContext, models: list[str], cost: float) 
     items = ctx.evidence.items
     cited = [i for i in dict.fromkeys(draft.evidence_ids) if ctx.evidence.get(i)]
     used = [i for i in items if i["evidence_id"] in cited] or items
-    kept, dropped = _checked_sentences(draft.answer, ctx.evidence)
-    limitations = [s.strip() for s in draft.limitations if s.strip()]
+    kept, dropped = _checked_sentences(_EVIDENCE_ID.sub("", draft.answer), ctx.evidence)
+    # a limitation that names an evidence id is an internal note, often a wrong one
+    limitations = [s.strip() for s in draft.limitations
+                   if s.strip() and not _EVIDENCE_ID.search(s)]
     if dropped:
         limitations.append(
             f"{len(dropped)} sentence(s) were removed: a number could not be matched to the "
             "evidence, or the sentence was a personal recommendation."
         )
     answer = " ".join(kept[:MAX_SENTENCES]) or NOTHING_VERIFIED
-    risk = derive_risk(used) or derive_risk(items)
+    risk, basis = derive_risk(used) or derive_risk(items) or (None, "")
     if risk is None and any(i["tool"] == "official_forecast" for i in used):
-        risk = draft.risk_level  # grades per region: the model's reading of them
+        # no place given: the model's reading of the regional grades
+        risk, basis = draft.risk_level, "AirKorea official forecast, as read by the model"
     confidence = min(max(draft.confidence, 0.0), 1.0)
     if risk is None:
         risk, confidence = "unknown", min(confidence, 0.3)
+    if risk == "unknown":
+        basis = ""
     if dropped or not kept:
         confidence = min(confidence, 0.5)
     cites = [
@@ -497,7 +554,7 @@ def _build(draft: AnswerDraft, ctx: AskContext, models: list[str], cost: float) 
         for c in ctx.cites.get(i["evidence_id"], [])
     ]
     return Answer(
-        answer=answer, risk_level=risk, time_window=draft.time_window[:120],
+        answer=answer, risk_level=risk, risk_basis=basis, time_window=draft.time_window[:120],
         confidence=round(confidence, 2), citations=cites,
         limitations=[*limitations, SAFETY_NOTE], **base,
     )
