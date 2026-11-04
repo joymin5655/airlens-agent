@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirLens Agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=Public+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="#/">AirLens Agent</a>
+  <p class="purpose">An AI agent that watches Korea's air every hour and works out what caused each pollution event.</p>
+  <nav class="site-nav" aria-label="Main">
+    <a href="#/" data-nav="investigate">Investigations</a>
+    <a href="#/ask" data-nav="ask">Ask about the air</a>
+  </nav>
+</header>
+
+<main id="investigate" class="investigate">
+  <aside class="cases" aria-label="Cases">
+    <section class="cases-group">
+      <h2>Today</h2>
+      <div id="today"><p class="loading">Loading the latest check.</p></div>
+    </section>
+    <section class="cases-group">
+      <h2>Past cases</h2>
+      <ul class="case-list" id="case-list"></ul>
+    </section>
+  </aside>
+
+  <section class="scene" aria-labelledby="scene-caption">
+    <div class="scene-frame" id="scene-frame">
+      <img class="scene-base" id="scene-base" alt="">
+      <img class="scene-mask" id="scene-mask" alt="">
+      <svg class="scene-marks" id="scene-marks" aria-hidden="true"></svg>
+      <div class="scene-divider" id="scene-divider" aria-hidden="true"></div>
+    </div>
+    <div class="scene-controls">
+      <label class="compare" id="compare-wrap">
+        <span>Compare the satellite image with SAM 3.1's mask</span>
+        <input type="range" id="compare" min="0" max="100" value="50">
+      </label>
+      <fieldset class="layers">
+        <legend>Show on the image</legend>
+        <label><input type="checkbox" data-layer="hotspots" checked> Fire hotspots</label>
+        <label><input type="checkbox" data-layer="stations" checked> Station readings</label>
+        <label><input type="checkbox" data-layer="wind" checked> Wind</label>
+        <label><input type="checkbox" data-layer="area" checked> Event area</label>
+      </fieldset>
+    </div>
+    <p class="scene-caption" id="scene-caption"></p>
+    <ul class="legend" id="legend"></ul>
+  </section>
+
+  <header class="verdict-head" id="verdict-head" aria-live="polite"></header>
+  <article class="verdict-body" id="verdict-body"></article>
+
+  <section class="pipeline" aria-labelledby="pipeline-title">
+    <h2 id="pipeline-title">How the agent worked this case</h2>
+    <ol class="steps" id="steps"></ol>
+    <div class="eval" id="eval" hidden>
+      <h2 id="eval-title">Same cases, three models</h2>
+      <p class="eval-note" id="eval-note"></p>
+      <div class="table-wrap"><table aria-labelledby="eval-title"><thead></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+</main>
+
+<main id="ask" class="ask" hidden>
+  <section class="ask-hero">
+    <h1>Ask about the air anywhere</h1>
+    <form class="ask-form" id="ask-form">
+      <label for="question" class="visually-hidden">Your question</label>
+      <textarea id="question" rows="2" aria-describedby="count question-error" placeholder="Is the air OK for a run in Seoul tomorrow morning?"></textarea>
+      <div class="ask-row">
+        <span class="count" id="count">0 / 300</span>
+        <button type="submit" id="ask-button">Ask the agent</button>
+      </div>
+      <p class="field-error" id="question-error" role="alert" hidden></p>
+    </form>
+    <p class="ask-status" id="ask-status" role="status" hidden></p>
+    <ul class="examples" aria-label="Example questions">
+      <li><button type="button">Is the air OK for a run in Seoul tomorrow morning?</button></li>
+      <li><button type="button">How dusty will Busan be this afternoon?</button></li>
+      <li><button type="button">Is there wildfire smoke near Gangneung today?</button></li>
+      <li><button type="button">What is the PM2.5 forecast for Tokyo tonight?</button></li>
+    </ul>
+    <div class="notices">
+      <p>Answers give air-quality information with sources. They are not health or medical advice.</p>
+      <p>Questions are processed by Meta's Muse Spark model and may be used to improve Meta's models. Leave out personal details.</p>
+    </div>
+  </section>
+
+  <article class="answer" id="answer" aria-live="polite" hidden></article>
+</main>
+
+<footer class="site-foot">
+  <p class="built">Built with Muse Spark Open</p>
+  <p>Satellite images NASA GIBS. Fire hotspots NASA FIRMS. Forecasts Copernicus CAMS and wind via Open-Meteo (CC BY 4.0). Station data AirKorea (KOGL Type 3). AirLens open data.</p>
+  <p>Code written for the Meta Global AI Developer Hackathon, Oct 27 to Nov 4, 2026.</p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
