@@ -304,6 +304,31 @@ def test_official_forecast_is_cached_per_day(live, monkeypatch):
     assert calls == [date(2026, 11, 4)]  # one fetch served both questions
 
 
+def test_tools_write_only_to_the_cache_connection(live, monkeypatch, tmp_path):
+    """On Modal the web container reads a read-only copy of the live DB; caches go to the ledger."""
+    import sqlite3
+
+    path = live.execute("PRAGMA database_list").fetchone()[2]
+    read_only = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    ledger = store.connect(tmp_path / "ledger.sqlite")
+    used = []
+
+    def fake(conn, day):
+        used.append(conn)
+        issued = datetime(2026, 11, 4, 5, tzinfo=KST)
+        return [Forecast(issued_at=issued, target_date=date(2026, 11, 5), pollutant="PM10",
+                         overall="Normal", cause="", grades={"서울": "보통"})]
+
+    monkeypatch.setattr(airkorea, "fetch_forecast", fake)
+    ctx = ask.AskContext(read_only, NOW, cache=ledger)
+    _, data, _ = ask.tool_official_forecast(ctx, {"day": "tomorrow"})
+    _, readings, _ = ask.tool_live_readings(ctx, {"lat": 37.566, "lon": 126.978, "radius_km": 10})
+    assert data["pm10"]["overall"] == "Normal" and used == [ledger]
+    assert readings  # read through the read-only connection
+    tables = {r[0] for r in ledger.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "ask_forecast_cache" in tables
+
+
 def test_active_events_tolerates_absence(live, tmp_path):
     ctx = ask.AskContext(live, NOW)
     assert ask.tool_active_events(ctx, {})[1]["available"] is False

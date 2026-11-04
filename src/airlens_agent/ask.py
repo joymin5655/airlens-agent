@@ -152,11 +152,18 @@ def derive_risk(items: list[dict]) -> RiskLevel | None:
 
 @dataclass
 class AskContext:
-    conn: sqlite3.Connection  # live DB: stations, observations, caches
+    conn: sqlite3.Connection  # live DB, only read: stations, observations
     now: datetime
     transport: object = None
     evidence: tools.Evidence = field(default_factory=tools.Evidence)
     cites: dict[str, list[dict]] = field(default_factory=dict)  # evidence id -> citations
+    # Caches and API call counters. On Modal the web container's live DB is a read-only copy
+    # that a refresh replaces, so answer() passes the ledger, the one file it may write.
+    cache: sqlite3.Connection | None = None
+
+    @property
+    def writable(self) -> sqlite3.Connection:
+        return self.cache if self.cache is not None else self.conn
 
 
 def _num(args: dict, name: str, lo: float, hi: float, default: float | None = None) -> float:
@@ -178,7 +185,7 @@ def tool_geocode(ctx: AskContext, args: dict) -> tuple[str, dict, list[dict]]:
     place = args.get("place")
     if not isinstance(place, str) or not place.strip():
         raise tools.ToolError("place must be a non-empty string")
-    results = geocode.search(ctx.conn, place[:100], transport=ctx.transport)
+    results = geocode.search(ctx.writable, place[:100], transport=ctx.transport)
     data: dict = {"results": results}
     if not results:
         data["note"] = "no place with this name was found"
@@ -264,7 +271,7 @@ def tool_official_forecast(ctx: AskContext, args: dict) -> tuple[str, dict, list
         raise tools.ToolError("day must be 'today' or 'tomorrow'")
     issue = ctx.now.astimezone(KST).date()
     target = (issue + timedelta(days=1 if day == "tomorrow" else 0)).isoformat()
-    items = _forecast_items(ctx.conn, issue)
+    items = _forecast_items(ctx.writable, issue)
     data: dict = {"day": target}
     cites = []
     for code, key in (("PM10", "pm10"), ("PM25", "pm25")):
@@ -288,7 +295,7 @@ def tool_cams_forecast(ctx: AskContext, args: dict) -> tuple[str, dict, list[dic
     lat, lon = _num(args, "lat", -90, 90), _num(args, "lon", -180, 180)
     ahead = int(_num(args, "hours_ahead", 0, 96, 0))
     length = int(_num(args, "duration_hours", 1, 24, 6))
-    raw = openmeteo.fetch_cams_window(ctx.conn, lat, lon, transport=ctx.transport)
+    raw = openmeteo.fetch_cams_window(ctx.writable, lat, lon, transport=ctx.transport)
     # the API answers in the point's local time; "now" there, to the hour
     local_now = (ctx.now.astimezone(UTC) + timedelta(seconds=raw["utc_offset_seconds"])).replace(
         minute=0, second=0, microsecond=0, tzinfo=None
@@ -643,7 +650,7 @@ def answer(
         quota.reserve(ledger, OP)
     except quota.QuotaExceeded as exc:
         return _cached(question, f"daily limit: {exc}")
-    ctx = AskContext(live_conn, now or datetime.now(KST), transport)
+    ctx = AskContext(live_conn, now or datetime.now(KST), transport, cache=ledger)
     try:
         return _run(question, ledger=ledger, ctx=ctx, lat=lat, lon=lon)
     except _STEP_ERRORS as exc:
