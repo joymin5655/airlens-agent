@@ -339,6 +339,7 @@ function renderAnswer(a) {
     <div class="risk">
       <p class="risk-word" data-grade="${key}">${esc(label)}</p>
       ${a.time_window ? `<p class="risk-window">${esc(a.time_window)}</p>` : ""}
+      ${a.risk_basis ? `<p class="risk-basis">Grade from the ${esc(a.risk_basis)}</p>` : ""}
       ${scale}
     </div>
     <p class="answer-text">${esc(a.answer)}</p>

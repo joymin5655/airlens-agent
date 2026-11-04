@@ -408,23 +408,15 @@ def _error(code: int, message: str) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=code)
 
 
-def _live_copy() -> sqlite3.Connection:
-    """The live DB copied into memory: the ask tools write caches (geocode, forecast, call
-    counts) to their connection, which must never reach the read-only file.
-
-    ponytail: copies the whole file per question (about 1.3 MB, 1.5 MB more per day); upgrade:
-    an attached in-memory cache schema.
-    """
-    mem = sqlite3.connect(":memory:", check_same_thread=False)
+def _live_for_ask() -> sqlite3.Connection:
+    """The live DB read-only, with plain tuple rows as the ask tools expect. The tools write their
+    caches and call counts to the ledger, never here. Before the hourly job has written the live
+    DB, an empty one in memory."""
+    path = config.live_db_path()
+    if path.is_file():
+        return sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True)
+    mem = sqlite3.connect(":memory:")
     mem.executescript(store.SCHEMA)
-    src = _ro(config.live_db_path())
-    if src is not None:
-        try:
-            src.backup(mem)
-        except sqlite3.Error:
-            pass
-        finally:
-            src.close()
     return mem
 
 
@@ -438,7 +430,7 @@ def ask_endpoint(body: AskIn, request: Request):
     if (limited := _rate_limited(_client(request), time.time())) is not None:
         return _error(429, limited)
     try:
-        ledger, live = _ledger(), _live_copy()
+        ledger, live = _ledger(), _live_for_ask()
         try:
             result = ask.answer(question, ledger=ledger, live_conn=live, lat=body.lat, lon=body.lon)
         finally:

@@ -1,6 +1,7 @@
 """Web server: events API, media safety, ask endpoint limits, status. No network, no keys."""
 
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -156,7 +157,13 @@ def fake_answer(monkeypatch):
 
     def fake(question, *, ledger, live_conn, lat=None, lon=None, **kw):
         files = [r[2] for r in ledger.execute("PRAGMA database_list")]
-        calls.append({"q": question, "ledger": files[0], "lat": lat})
+        try:
+            live_conn.execute("CREATE TABLE probe (x)")
+            writable = True
+        except sqlite3.OperationalError:
+            writable = False
+        calls.append({"q": question, "ledger": files[0], "lat": lat, "live_writable": writable,
+                      "stations": live_conn.execute("SELECT COUNT(*) FROM stations").fetchone()})
         return ask.Answer(answer="ok", risk_level="good", confidence=0.5)
 
     monkeypatch.setattr(server.ask, "answer", fake)
@@ -170,6 +177,16 @@ def test_ask_answers_and_charges_the_web_ledger(site, tmp_path, monkeypatch, fak
     assert r.status_code == 200 and r.json()["answer"] == "ok"
     assert fake_answer[0]["q"] == "Is Seoul OK?" and fake_answer[0]["lat"] == 37.5
     assert fake_answer[0]["ledger"].endswith("web-ledger.sqlite")
+    assert fake_answer[0]["stations"] == (0,)  # no live DB yet: an empty one in memory
+
+
+def test_ask_reads_the_live_db_read_only(site, tmp_path, fake_answer):
+    """The hourly job is the only writer of live.sqlite; ask writes its caches to the ledger."""
+    conn = store.connect(tmp_path / "live.sqlite")
+    store.upsert_stations(conn, [Station("서울|중구", "중구", "서울", 37.564, 126.975, None, "t")])
+    conn.close()
+    assert site.post("/api/ask", json={"question": "Seoul air?"}).status_code == 200
+    assert fake_answer[0]["stations"] == (1,) and fake_answer[0]["live_writable"] is False
 
 
 @pytest.mark.parametrize("question", ["", "   ", "x" * 301])
