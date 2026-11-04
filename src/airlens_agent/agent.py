@@ -141,7 +141,8 @@ _OTHER = {"meta": "baseten", "baseten": "meta"}
 class Route:
     """The provider in use; a missing key or an exhausted budget switches to the other once."""
 
-    def __init__(self, provider: str):
+    def __init__(self, provider: str, *, allow_fallback: bool = True):
+        self.allow_fallback = allow_fallback  # the eval turns it off: a failure is a failure
         self.requested = self.provider = provider
         self.answered = ""  # provider of the last call that succeeded
         self.fallback: str | None = None
@@ -150,7 +151,7 @@ class Route:
         try:
             out = fn(self.provider)
         except (config.MissingKeyError, quota.BudgetExceeded) as exc:
-            if self.fallback is not None:
+            if self.fallback is not None or not self.allow_fallback or self.provider not in _OTHER:
                 raise
             self.fallback = f"{self.provider} -> {_OTHER[self.provider]}: {exc}"
             self.provider = _OTHER[self.provider]
@@ -244,7 +245,8 @@ FINAL_REQUEST = (
 
 
 def triage(
-    candidate: Candidate, *, ledger: sqlite3.Connection, provider: str = "baseten", transport=None
+    candidate: Candidate, *, ledger: sqlite3.Connection, provider: str = "baseten", transport=None,
+    allow_fallback: bool = True,
 ) -> Triage:
     """First-pass category and hypotheses from the candidate's detector features.
 
@@ -256,7 +258,7 @@ def triage(
         {"role": "system", "content": TRIAGE_SYSTEM},
         {"role": "user", "content": describe(candidate)},
     ]
-    route = Route(provider)
+    route = Route(provider, allow_fallback=allow_fallback)
     try:
         obj, res = route.call(
             lambda p: llm.json_chat(
@@ -398,6 +400,7 @@ def investigate(
     image_dir: Path | None = None,
     out_dir: Path | None = None,
     transport=None,
+    allow_fallback: bool = True,
 ) -> Report:
     """Tool-calling loop over the event DB, then a structured report whose claims are verified.
 
@@ -408,7 +411,7 @@ def investigate(
     ctx = tools.Context(conn, candidate, ledger=ledger, image_dir=image_dir, out_dir=out_dir,
                         transport=transport)
     ctx.evidence.add("detector", {}, DETECTOR_SOURCE, detector_summary(candidate))  # E1
-    route = Route(investigator)
+    route = Route(investigator, allow_fallback=allow_fallback)
     spent_before = quota.spent_total(ledger)
     models: list[str] = []
     messages: list[dict] = [

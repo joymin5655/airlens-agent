@@ -276,3 +276,37 @@ def test_flat_schema_leaves_map_objects_open():
     assert props["inner"]["additionalProperties"] is False and props["inner"]["required"] == ["x"]
     assert schema["required"] == ["scores", "by_name", "inner"]
     assert schema["additionalProperties"] is False and "$ref" not in json.dumps(schema)
+
+
+def test_openai_request_shape_forces_no_reasoning_and_uses_completion_tokens(conn, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "FAKE-OPENAI-KEY-4d5e6f")
+    transport, seen = _transport(_reply(), _reply())
+    tools = [{"type": "function", "function": {"name": "wind"}}]
+    fmt = {"type": "json_schema", "json_schema": {"name": "x", "schema": {}, "strict": True}}
+    llm.chat("openai", [{"role": "user", "content": "x"}], tools=tools, response_format=fmt,
+             reasoning_effort="medium", max_tokens=55, ledger=conn, transport=transport)
+    req = seen[0]
+    assert req["url"] == "https://api.openai.com/v1/chat/completions"
+    assert req["headers"]["authorization"] == "Bearer FAKE-OPENAI-KEY-4d5e6f"
+    body = req["body"]
+    assert body["model"] == config.OPENAI_MODEL == "gpt-6-luna"
+    assert body["max_completion_tokens"] == 55 and "max_tokens" not in body
+    assert body["tools"] == tools and body["response_format"] == fmt
+    # chat completions only allow function calling with effort "none": the caller's is overridden
+    assert body["reasoning_effort"] == "none" and "tool_choice" not in body
+
+
+def test_openai_costs_are_booked_against_its_own_ledger_and_cap(conn, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "FAKE-OPENAI-KEY-4d5e6f")
+    million = {"prompt_tokens": 1_000_000, "completion_tokens": 1_000_000}
+    transport, _ = _transport(_reply(usage=million))
+    res = llm.chat("openai", [{"role": "user", "content": "x"}], ledger=conn, transport=transport)
+    assert res.cost_usd == pytest.approx(0.10 + 0.50)
+    assert quota.spent(conn, "openai") == pytest.approx(0.60)
+    assert config.SPEND_CAPS["openai"] <= 5.0
+
+
+def test_openai_without_a_key_raises_missing_key(conn, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(config.MissingKeyError):
+        llm.chat("openai", [], ledger=conn, transport=_transport(_reply())[0])

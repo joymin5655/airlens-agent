@@ -27,6 +27,7 @@ class Provider:
     token_param: str  # name of the output-token limit parameter
     op: str  # quota op
     default_effort: str | None = None  # reasoning_effort when the caller passes none
+    fixed_effort: str | None = None  # reasoning_effort sent whatever the caller passes
 
 
 PROVIDERS: dict[str, Provider] = {
@@ -39,6 +40,17 @@ PROVIDERS: dict[str, Provider] = {
         1.25, 0.15, 4.25, "max_tokens", "baseten.chat",
         # its own default is xhigh, which can spend the whole max_tokens on reasoning
         default_effort="medium",
+    ),
+    # Prices (input $0.10 / cached $0.01 / output $0.50 per 1M tokens) and the effort rule are from
+    # https://developers.openai.com/api/docs/models/gpt-6-luna (checked 2026-11-04): "Chat
+    # Completions supports function calling only with reasoning_effort set to none". So every
+    # call sends "none", i.e. this baseline does not reason; the request reference
+    # (https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)
+    # deprecates max_tokens in favour of max_completion_tokens.
+    # ponytail: no reasoning for the baseline; upgrade: Responses API, which allows tools + effort.
+    "openai": Provider(
+        "openai", config.OPENAI_API_BASE, config.openai_api_key, config.OPENAI_MODEL,
+        0.10, 0.01, 0.50, "max_completion_tokens", "openai.chat", fixed_effort="none",
     ),
 }
 
@@ -136,7 +148,7 @@ def chat(
         payload["tools"] = tools
     if response_format:
         payload["response_format"] = response_format
-    if effort := reasoning_effort or prov.default_effort:
+    if effort := prov.fixed_effort or reasoning_effort or prov.default_effort:
         payload["reasoning_effort"] = effort
     resp = http.post_json(
         f"{prov.base_url}/chat/completions",

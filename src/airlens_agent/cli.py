@@ -156,6 +156,19 @@ def cmd_investigate(args) -> dict:
     }
 
 
+def cmd_eval(args) -> dict:
+    from . import evaluate  # evaluate imports this module
+
+    models = [m for m in args.models.split(",") if m]
+    events = [e for e in args.events.split(",") if e]
+    try:
+        result = evaluate.run(events, models, args.runs, ledger=_live())
+    except evaluate.EvalError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(evaluate.render_tables(result))
+    return {"saved": "eval/latest.json", "investigations": len(result["results"])}
+
+
 def cmd_sam_trial(args) -> dict:
     ev = get_event(args.name)
     ledger = _live()
@@ -208,9 +221,14 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("investigate")
     p.add_argument("name")
     p.add_argument("--event-id")
-    p.add_argument("--investigator", choices=("meta", "baseten"), default="meta")
+    p.add_argument("--investigator", choices=("meta", "baseten", "openai"), default="meta")
     p.add_argument("--max-steps", type=int, default=8)
     p.set_defaults(fn=cmd_investigate)
+    p = sub.add_parser("eval")
+    p.add_argument("--models", default="meta,baseten,openai")
+    p.add_argument("--runs", type=int, default=2)
+    p.add_argument("--events", default="fire-2025-03,dust-2026-02")
+    p.set_defaults(fn=cmd_eval)
     p = sub.add_parser("sam-trial")
     p.add_argument("name")
     p.add_argument("--prompt", action="append")
