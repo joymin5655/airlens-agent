@@ -5,7 +5,7 @@ import json
 import sys
 from datetime import datetime, timedelta
 
-from . import agent, config, detect, http, monitor, quota, replay, store, tools
+from . import agent, ask, config, detect, http, monitor, quota, replay, store, tools
 from .events import get_event
 from .sources import airkorea, firms, gibs, sam
 
@@ -199,6 +199,17 @@ def cmd_monitor(args) -> dict:
     )
 
 
+def cmd_ask(args) -> dict:
+    conn = _live()
+    if args.build_examples:
+        return ask.build_examples(ledger=conn, live_conn=conn)
+    if not args.question:
+        raise SystemExit("give a question, or --build-examples")
+    return ask.answer(
+        args.question, ledger=conn, live_conn=conn, lat=args.lat, lon=args.lon
+    ).model_dump()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="airlens-agent")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -225,6 +236,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-investigate", action="store_true")
     p.add_argument("--max-investigations", type=int, default=1)
     p.set_defaults(fn=cmd_monitor)
+    p = sub.add_parser("ask")
+    p.add_argument("question", nargs="?")
+    p.add_argument("--lat", type=float)
+    p.add_argument("--lon", type=float)
+    p.add_argument("--build-examples", action="store_true")
+    p.set_defaults(fn=cmd_ask)
     args = parser.parse_args(argv)
     result = args.fn(args)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))

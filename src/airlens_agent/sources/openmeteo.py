@@ -93,6 +93,35 @@ def fetch_air_quality(
     return samples
 
 
+ASK_VARS = ("pm10", "pm2_5", "dust", "aerosol_optical_depth", "ozone")
+
+
+def fetch_cams_window(
+    conn: sqlite3.Connection, lat: float, lon: float, *, transport=None
+) -> dict:
+    """The next days of hourly CAMS air quality at one point, in the point's own local time.
+
+    Returns {"utc_offset_seconds": int, "hours": {naive local ISO hour: {variable: value}}}.
+    Worldwide (CAMS global, about 0.4 degrees); not stored in the DB.
+    ponytail: one request per question, no cache (the free tier allows 10,000 calls/day);
+    upgrade: cache per rounded point and hour.
+    """
+    params = {
+        "latitude": lat, "longitude": lon, "hourly": ",".join(ASK_VARS),
+        "timezone": "auto", "forecast_days": 7, "domains": "cams_global",
+    }
+    data = http.get(
+        AIR_QUALITY_URL, params, op="openmeteo.ask_air_quality", conn=conn, transport=transport
+    ).json()
+    block = data.get("hourly") or {}
+    times = block.get("time") or []
+    hours = {
+        t: {v: block[v][i] for v in ASK_VARS if v in block and i < len(block[v])}
+        for i, t in enumerate(times)
+    }
+    return {"utc_offset_seconds": int(data.get("utc_offset_seconds") or 0), "hours": hours}
+
+
 def use_archive(end: datetime, now: datetime | None = None) -> bool:
     """ERA5 archive is used only when `end` is older than its ~5-day lag."""
     now = now or datetime.now(KST)
