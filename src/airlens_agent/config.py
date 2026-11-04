@@ -35,6 +35,7 @@ QUOTA_CAPS: dict[str, int] = {
     "meta.sam": 300,
     "baseten.chat": 400,
     "site.ask": 300,  # citizen questions per day (ask.answer)
+    "openai.chat": 400,
 }
 
 META_API_BASE = "https://api.meta.ai/v1"
@@ -42,11 +43,15 @@ BASETEN_API_BASE = "https://inference.baseten.co/v1"
 MUSE_SPARK_MODEL = "muse-spark-1.3-contributor"
 MUSE_SPARK_OPEN_MODEL = "meta-models/muse-spark-open-1026"
 SAM_MODEL = "sam-3.1"
+OPENAI_API_BASE = "https://api.openai.com/v1"
+OPENAI_MODEL = os.environ.get("AIRLENS_OPENAI_MODEL") or "gpt-6-luna"  # comparison baseline
 
 # All-time USD budget per provider (dev and test share it); override with AIRLENS_BUDGET_<P>_USD.
 SPEND_CAPS: dict[str, float] = {
     "meta": float(os.environ.get("AIRLENS_BUDGET_META_USD") or 40.0),
     "baseten": float(os.environ.get("AIRLENS_BUDGET_BASETEN_USD") or 40.0),
+    # hard all-time cap for the OpenAI baseline: the env var may lower it, never raise it
+    "openai": min(5.0, float(os.environ.get("AIRLENS_BUDGET_OPENAI_USD") or 5.0)),
 }
 
 # Live monitor caps. Daily USD per provider (KST day; a provider not listed has no daily cap),
@@ -84,6 +89,10 @@ def model_api_key() -> str:
 
 def baseten_api_key() -> str:
     return _require("BASETEN_API_KEY")
+
+
+def openai_api_key() -> str:
+    return _require("OPENAI_API_KEY")
 
 
 def data_dir() -> Path:
